@@ -47,6 +47,10 @@ deleted, moved, etc)."
   "Non-nil to show buffers on other workspaces."
   :type 'boolean)
 
+(defcustom exwm-workspace-warp-cursor nil
+  "Non-nil to warp cursor automatically after workspace switch."
+  :type 'boolean)
+
 (defcustom exwm-workspace-number 1
   "Initial number of workspaces."
   :type 'integer)
@@ -502,7 +506,7 @@ for internal use only."
    (list
     (cond
      ((null current-prefix-arg)
-      (unless (and (eq major-mode 'exwm-mode)
+      (unless (and (derived-mode-p 'exwm-mode)
                    ;; The prompt is invisible in fullscreen mode.
                    (exwm-layout--fullscreen-p))
         (let ((exwm-workspace--prompt-add-allowed t)
@@ -595,6 +599,17 @@ for internal use only."
           (make-instance 'xcb:ewmh:set-_NET_CURRENT_DESKTOP
                          :window exwm--root :data index))
       (xcb:flush exwm--connection))
+    (when exwm-workspace-warp-cursor
+      (with-slots (win-x win-y)
+          (xcb:+request-unchecked+reply exwm--connection
+              (make-instance 'xcb:QueryPointer
+                             :window (frame-parameter frame
+                                                      'exwm-outer-id)))
+        (when (or (> win-x (frame-pixel-width frame))
+                  (> win-y (frame-pixel-height)))
+          (set-mouse-position frame
+                              (/ (frame-width frame) 2)
+                              (/ (frame-height frame) 2)))))
     (when (frame-live-p old-frame)
       (with-selected-frame old-frame
         (run-hooks 'focus-out-hook)))
@@ -629,7 +644,7 @@ Passing a workspace frame as the first option is for internal use only."
 (defun exwm-workspace-swap (workspace1 workspace2)
   "Interchange position of WORKSPACE1 with that of WORKSPACE2."
   (interactive
-   (unless (and (eq major-mode 'exwm-mode)
+   (unless (and (derived-mode-p 'exwm-mode)
                 ;; The prompt is invisible in fullscreen mode.
                 (exwm-layout--fullscreen-p))
      (let (w1 w2)
@@ -669,7 +684,7 @@ before it."
   (interactive
    (cond
     ((null current-prefix-arg)
-     (unless (and (eq major-mode 'exwm-mode)
+     (unless (and (derived-mode-p 'exwm-mode)
                   ;; The prompt is invisible in fullscreen mode.
                   (exwm-layout--fullscreen-p))
        (list exwm-workspace--current
@@ -906,7 +921,7 @@ INDEX must not exceed the current number of workspaces."
                  (rename-buffer (concat " " (buffer-name)))))))))))
   (when buffer-or-name
     (with-current-buffer buffer-or-name
-      (if (eq major-mode 'exwm-mode)
+      (if (derived-mode-p 'exwm-mode)
           ;; EXWM buffer.
           (if (eq exwm--frame exwm-workspace--current)
               ;; On the current workspace.
