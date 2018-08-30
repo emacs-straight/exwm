@@ -59,6 +59,7 @@
 
 (defun exwm-layout--set-state (id state)
   "Set WM_STATE."
+  (exwm--log "id=#x%x" id)
   (xcb:+request exwm--connection
       (make-instance 'xcb:icccm:set-WM_STATE
                      :window id :state state :icon xcb:Window:None))
@@ -146,6 +147,7 @@
 (cl-defun exwm-layout-set-fullscreen (&optional id)
   "Make window ID fullscreen."
   (interactive)
+  (exwm--log "id=#x%x" (or id 0))
   (unless (and (or id (derived-mode-p 'exwm-mode))
                (not (exwm-layout--fullscreen-p)))
     (cl-return-from exwm-layout-set-fullscreen))
@@ -174,6 +176,7 @@
 (cl-defun exwm-layout-unset-fullscreen (&optional id)
   "Restore window from fullscreen state."
   (interactive)
+  (exwm--log "id=#x%x" (or id 0))
   (unless (and (or id (derived-mode-p 'exwm-mode))
                (exwm-layout--fullscreen-p))
     (cl-return-from exwm-layout-unset-fullscreen))
@@ -203,6 +206,7 @@
 (cl-defun exwm-layout-toggle-fullscreen (&optional id)
   "Toggle fullscreen mode."
   (interactive (list (exwm--buffer->id (window-buffer))))
+  (exwm--log "id=#x%x" (or id 0))
   (unless (or id (derived-mode-p 'exwm-mode))
     (cl-return-from exwm-layout-toggle-fullscreen))
   (when id
@@ -234,6 +238,7 @@ selected by `other-buffer'."
 
 (defun exwm-layout--set-client-list-stacking ()
   "Set _NET_CLIENT_LIST_STACKING."
+  (exwm--log)
   (let (id clients-floating clients clients-iconic clients-other)
     (dolist (pair exwm--id-buffer-alist)
       (setq id (car pair))
@@ -261,78 +266,99 @@ selected by `other-buffer'."
   ;; `window-configuration-change-hook' makes the frame selected.
   (unless frame
     (setq frame (selected-frame)))
+  (exwm--log "frame=%s" frame)
+  (if (not (exwm-workspace--workspace-p frame))
+      (if (frame-parameter frame 'exwm-outer-id)
+          (exwm-layout--refresh-floating frame)
+        (exwm-layout--refresh-other frame))
+    (exwm-layout--refresh-workspace frame)))
+
+(defun exwm-layout--refresh-floating (frame)
+  "Refresh floating frame FRAME."
+  (exwm--log "Refresh floating %s" frame)
+  (let ((window (frame-first-window frame)))
+    (with-current-buffer (window-buffer window)
+      (when (and (derived-mode-p 'exwm-mode)
+                 ;; It may be a buffer waiting to be killed.
+                 (exwm--id->buffer exwm--id))
+        (exwm--log "Refresh floating window #x%x" exwm--id)
+        (if (exwm-workspace--active-p exwm--frame)
+            (exwm-layout--show exwm--id window)
+          (exwm-layout--hide exwm--id))))))
+
+(defun exwm-layout--refresh-other (frame)
+  "Refresh client or nox frame FRAME."
+  ;; Other frames (e.g. terminal/graphical frame of emacsclient)
+  ;; We shall bury all `exwm-mode' buffers in this case
+  (exwm--log "Refresh other %s" frame)
+  (let ((windows (window-list frame 'nomini)) ;exclude minibuffer
+        (exwm-layout--other-buffer-exclude-exwm-mode-buffers t))
+    (dolist (window windows)
+      (with-current-buffer (window-buffer window)
+        (when (derived-mode-p 'exwm-mode)
+          (switch-to-prev-buffer window))))))
+
+(defun exwm-layout--refresh-workspace (frame)
+  "Refresh workspace frame FRAME."
+  (exwm--log "Refresh workspace %s" frame)
+  ;; Workspaces other than the active one can also be refreshed (RandR)
   (let (covered-buffers   ;EXWM-buffers covered by a new X window.
-        vacated-windows   ;Windows previously displaying EXWM-buffers.
-        windows)
-    (if (not (exwm-workspace--workspace-p frame))
-        (if (frame-parameter frame 'exwm-outer-id)
-            ;; Refresh a floating frame
-            (let ((window (frame-first-window frame)))
-              (with-current-buffer (window-buffer window)
-                (when (and (derived-mode-p 'exwm-mode)
-                           ;; It may be a buffer waiting to be killed.
-                           (exwm--id->buffer exwm--id))
-                  (exwm--log "Refresh floating window #x%x" exwm--id)
-                  (if (exwm-workspace--active-p exwm--frame)
-                      (exwm-layout--show exwm--id window)
-                    (exwm-layout--hide exwm--id)))))
-          ;; Other frames (e.g. terminal/graphical frame of emacsclient)
-          ;; We shall bury all `exwm-mode' buffers in this case
-          (setq windows (window-list frame 0)) ;exclude minibuffer
-          (let ((exwm-layout--other-buffer-exclude-exwm-mode-buffers t))
-            (dolist (window windows)
-              (with-current-buffer (window-buffer window)
-                (when (derived-mode-p 'exwm-mode)
-                  (switch-to-prev-buffer window))))))
-      ;; Refresh the whole workspace
-      ;; Workspaces other than the active one can also be refreshed (RandR)
-      (exwm--log "Refresh workspace %s" frame)
-      (dolist (pair exwm--id-buffer-alist)
-        (with-current-buffer (cdr pair)
-          (when (and (not exwm--floating-frame) ;exclude floating X windows
-                     (or exwm-layout-show-all-buffers
-                         ;; Exclude X windows on other workspaces
-                         (eq frame exwm--frame)))
-            (setq windows (get-buffer-window-list (current-buffer) 0))
+        vacated-windows)  ;Windows previously displaying EXWM-buffers.
+    (dolist (pair exwm--id-buffer-alist)
+      (with-current-buffer (cdr pair)
+        (when (and (not exwm--floating-frame) ;exclude floating X windows
+                   (or exwm-layout-show-all-buffers
+                       ;; Exclude X windows on other workspaces
+                       (eq frame exwm--frame)))
+          (let (;; List of windows in current frame displaying the `exwm-mode'
+                ;; buffers.
+                (windows (get-buffer-window-list (current-buffer) 'nomini
+                                                 frame)))
             (if (not windows)
                 (when (eq frame exwm--frame)
+                  ;; Hide it if it was being shown in this workspace.
                   (exwm-layout--hide exwm--id))
               (let ((window (car windows)))
                 (if (eq frame exwm--frame)
                     (when (exwm-workspace--active-p frame)
+                      ;; Show it if `frame' is active.
                       (exwm-layout--show exwm--id window))
+                  ;; It was last shown in other workspace; move it here.
                   (exwm-workspace-move-window frame exwm--id))
-                ;; Make sure this buffer is not displayed elsewhere.  Note down
-                ;; windows displaying an EXWM-buffer now displayed elsewhere; we
-                ;; need to display with some other buffer there.
+                ;; Vacate any other windows (in any workspace) showing this
+                ;; `exwm-mode' buffer.
                 (setq vacated-windows
-                      (append vacated-windows (cdr (get-buffer-window-list
-                                                    (current-buffer) 0 t))))
-                ;; Note down when an EXWM-buffer is being covered by this
-                ;; buffer; we don't want it to reappear in some vacated window.
+                      (append vacated-windows (remove
+                                               window
+                                               (get-buffer-window-list
+                                                (current-buffer) 'nomini t))))
+                ;; Note any `exwm-mode' buffer is being covered by another
+                ;; `exwm-mode' buffer.  We want to avoid that `exwm-mode'
+                ;; buffer to be reappear in any of the vacated windows.
                 (let ((prev-buffer (car-safe
                                     (car-safe (window-prev-buffers window)))))
                   (and
                    prev-buffer
                    (with-current-buffer prev-buffer
                      (derived-mode-p 'exwm-mode))
-                   (push prev-buffer covered-buffers))))))))
-      ;; Set some sensible buffer to vacated windows.
-      (let ((exwm-layout--other-buffer-exclude-buffers covered-buffers))
-        (dolist (window vacated-windows)
-          (switch-to-prev-buffer window)))
-      ;; Make sure windows floating / on other workspaces are excluded
-      (let ((exwm-layout--other-buffer-exclude-exwm-mode-buffers t))
-        (dolist (window (window-list frame 0))
-          (with-current-buffer (window-buffer window)
-            (when (and (derived-mode-p 'exwm-mode)
-                       (or exwm--floating-frame (not (eq frame exwm--frame))))
-              (switch-to-prev-buffer window)))))
-      (exwm-layout--set-client-list-stacking)
-      (xcb:flush exwm--connection))))
+                   (push prev-buffer covered-buffers)))))))))
+    ;; Set some sensible buffer to vacated windows.
+    (let ((exwm-layout--other-buffer-exclude-buffers covered-buffers))
+      (dolist (window vacated-windows)
+        (switch-to-prev-buffer window)))
+    ;; Make sure windows floating / on other workspaces are excluded
+    (let ((exwm-layout--other-buffer-exclude-exwm-mode-buffers t))
+      (dolist (window (window-list frame 'nomini))
+        (with-current-buffer (window-buffer window)
+          (when (and (derived-mode-p 'exwm-mode)
+                     (or exwm--floating-frame (not (eq frame exwm--frame))))
+            (switch-to-prev-buffer window)))))
+    (exwm-layout--set-client-list-stacking)
+    (xcb:flush exwm--connection)))
 
 (defun exwm-layout--on-minibuffer-setup ()
   "Refresh layout when minibuffer grows."
+  (exwm--log)
   (unless (exwm-workspace--client-p)
     (exwm--defer 0 (lambda ()
                      (when (< 1 (window-height (minibuffer-window)))
@@ -345,6 +371,7 @@ selected by `other-buffer'."
              (or (cl-position ?\n (current-message))
                  (> (length (current-message))
                     (frame-width exwm-workspace--current))))
+    (exwm--log)
     (if dirty
         (exwm-layout--refresh)
       (exwm--defer 0 #'exwm-layout--refresh))))
@@ -361,6 +388,7 @@ Normal hints are checked and regarded if the selected window is displaying an
 `exwm-mode' buffer.  However, this may violate the normal hints set on other X
 windows."
   (interactive "p")
+  (exwm--log)
   (cond
    ((zerop delta))                     ;no operation
    ((window-minibuffer-p))             ;avoid resize minibuffer-window
@@ -466,6 +494,7 @@ See also `exwm-layout-enlarge-window'."
 (defun exwm-layout-hide-mode-line ()
   "Hide mode-line."
   (interactive)
+  (exwm--log)
   (when (and (derived-mode-p 'exwm-mode) mode-line-format)
     (let (mode-line-height)
       (when exwm--floating-frame
@@ -484,6 +513,7 @@ See also `exwm-layout-enlarge-window'."
 (defun exwm-layout-show-mode-line ()
   "Show mode-line."
   (interactive)
+  (exwm--log)
   (when (and (derived-mode-p 'exwm-mode) (not mode-line-format))
     (setq mode-line-format exwm--mode-line-format
           exwm--mode-line-format nil)
@@ -501,6 +531,7 @@ See also `exwm-layout-enlarge-window'."
 (defun exwm-layout-toggle-mode-line ()
   "Toggle the display of mode-line."
   (interactive)
+  (exwm--log)
   (when (derived-mode-p 'exwm-mode)
     (if mode-line-format
         (exwm-layout-hide-mode-line)
@@ -509,6 +540,7 @@ See also `exwm-layout-enlarge-window'."
 (defun exwm-layout--init ()
   "Initialize layout module."
   ;; Auto refresh layout
+  (exwm--log)
   (add-hook 'window-configuration-change-hook #'exwm-layout--refresh)
   ;; The behavior of `window-configuration-change-hook' will be changed.
   (when (fboundp 'window-pixel-width-before-size-change)
@@ -522,6 +554,7 @@ See also `exwm-layout-enlarge-window'."
 
 (defun exwm-layout--exit ()
   "Exit the layout module."
+  (exwm--log)
   (remove-hook 'window-configuration-change-hook #'exwm-layout--refresh)
   (when (fboundp 'window-pixel-width-before-size-change)
     (remove-hook 'window-size-change-functions #'exwm-layout--refresh))

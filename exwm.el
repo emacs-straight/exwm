@@ -360,6 +360,7 @@
     (xcb:unmarshal obj data)
     (setq id (slot-value obj 'window)
           atom (slot-value obj 'atom))
+    (exwm--log "atom=%s(%s)" (x-get-atom-name atom exwm-workspace--current) atom)
     (setq buffer (exwm--id->buffer id))
     (if (not (buffer-live-p buffer))
         ;; Properties of unmanaged X windows.
@@ -397,6 +398,7 @@
     (setq type (slot-value obj 'type)
           id (slot-value obj 'window)
           data (slot-value (slot-value obj 'data) 'data32))
+    (exwm--log "atom=%s(%s)" (x-get-atom-name type exwm-workspace--current) type)
     (cond
      ;; _NET_NUMBER_OF_DESKTOPS.
      ((= type xcb:Atom:_NET_NUMBER_OF_DESKTOPS)
@@ -665,15 +667,15 @@
                        :visual 0
                        :value-mask xcb:CW:OverrideRedirect
                        :override-redirect 1))
+    ;; Set _NET_WM_NAME
+    (xcb:+request exwm--connection
+        (make-instance 'xcb:ewmh:set-_NET_WM_NAME
+                       :window new-id :data "EXWM: exwm--guide-window"))
     (dolist (i (list exwm--root new-id))
       ;; Set _NET_SUPPORTING_WM_CHECK
       (xcb:+request exwm--connection
           (make-instance 'xcb:ewmh:set-_NET_SUPPORTING_WM_CHECK
-                         :window i :data new-id))
-      ;; Set _NET_WM_NAME
-      (xcb:+request exwm--connection
-          (make-instance 'xcb:ewmh:set-_NET_WM_NAME
-                         :window i :data "EXWM"))))
+                         :window i :data new-id))))
   ;; Set _NET_DESKTOP_VIEWPORT (we don't support large desktop).
   (xcb:+request exwm--connection
       (make-instance 'xcb:ewmh:set-_NET_DESKTOP_VIEWPORT
@@ -712,7 +714,7 @@ manager.  If t, replace it, if nil, abort and ask the user if `ask'."
                          :override-redirect 0))
       (xcb:+request exwm--connection
           (make-instance 'xcb:ewmh:set-_NET_WM_NAME
-                         :window new-owner :data "EXWM selection owner"))
+                         :window new-owner :data "EXWM: exwm--wmsn-window"))
       (xcb:+request-checked+request-check exwm--connection
           (make-instance 'xcb:SetSelectionOwner
                          :selection xcb:Atom:WM_S0
