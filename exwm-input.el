@@ -87,7 +87,7 @@ defined in `exwm-mode-map' here."
                        value))))
 
 (defcustom exwm-input-line-mode-passthrough nil
-  "Non-nil makes 'line-mode' forwards all events to Emacs."
+  "Non-nil makes 'line-mode' forward all events to Emacs."
   :type 'boolean)
 
 ;; Input focus update requests should be accumulated for a short time
@@ -351,16 +351,9 @@ ARGS are additional arguments to CALLBACK."
                 (x-focus-frame (window-frame window))
               ;; X input focus should be set on the previously selected
               ;; frame.
-              (x-focus-frame (window-frame (minibuffer-selected-window))))
+              (x-focus-frame (window-frame (minibuffer-window))))
             (exwm-input--set-active-window)
             (xcb:flush exwm--connection)))))))
-
-(defun exwm-input--on-minibuffer-setup ()
-  "Run in `minibuffer-setup-hook' to set input focus."
-  (exwm--log)
-  (unless (exwm-workspace--client-p)
-    ;; Set input focus on the Emacs frame
-    (x-focus-frame (window-frame (minibuffer-selected-window)))))
 
 (defun exwm-input--set-active-window (&optional id)
   "Set _NET_ACTIVE_WINDOW."
@@ -378,11 +371,11 @@ ARGS are additional arguments to CALLBACK."
     (xcb:unmarshal obj data)
     (exwm--log "major-mode=%s buffer=%s"
                major-mode (buffer-name (current-buffer)))
-    (with-slots (detail time event state) obj
+    (with-slots (detail event state) obj
       (setq button-event (xcb:keysyms:keysym->event exwm--connection
                                                     detail state)
-            window (get-buffer-window (exwm--id->buffer event) t)
-            buffer (window-buffer window))
+            buffer (exwm--id->buffer event)
+            window (get-buffer-window buffer t))
       (cond ((and (eq button-event exwm-input-move-event)
                   ;; Either an undecorated or a floating X window.
                   (with-current-buffer buffer
@@ -414,11 +407,15 @@ ARGS are additional arguments to CALLBACK."
                ;; It has been reported that the `window' may have be deleted
                (if (window-live-p window)
                    (select-window window)
-                 (setq window
-                       (get-buffer-window (exwm--id->buffer event) t))
+                 (setq window (get-buffer-window buffer t))
                  (when window (select-window window))))
-             ;; The event should be replayed
-             (setq mode xcb:Allow:ReplayPointer))))
+             (with-current-buffer buffer
+               (when (derived-mode-p 'exwm-mode)
+                 (cl-case (exwm-input--current-input-mode)
+                   (line-mode
+                    (setq mode (exwm-input--on-ButtonPress-line-mode buffer button-event)))
+                   (char-mode
+                    (setq mode (exwm-input--on-ButtonPress-char-mode)))))))))
     (xcb:+request exwm--connection
         (make-instance 'xcb:AllowEvents :mode mode :time xcb:Time:CurrentTime))
     (xcb:flush exwm--connection)))
@@ -428,9 +425,13 @@ ARGS are additional arguments to CALLBACK."
   (let ((obj (make-instance 'xcb:KeyPress)))
     (xcb:unmarshal obj data)
     (exwm--log "major-mode=%s buffer=%s"
-	       major-mode (buffer-name (current-buffer)))
+               major-mode (buffer-name (current-buffer)))
     (if (derived-mode-p 'exwm-mode)
-        (funcall exwm--on-KeyPress obj data)
+        (cl-case (exwm-input--current-input-mode)
+          (line-mode
+           (exwm-input--on-KeyPress-line-mode obj data))
+          (char-mode
+           (exwm-input--on-KeyPress-char-mode obj data)))
       (exwm-input--on-KeyPress-char-mode obj))))
 
 (defun exwm-input--on-CreateNotify (data _synthetic)
@@ -571,12 +572,33 @@ instead."
   ;; Attempt to translate this key sequence.
   (setq exwm-input--line-mode-cache
         (exwm-input--translate exwm-input--line-mode-cache))
-  ;; When the key sequence is complete.
-  (unless (keymapp (key-binding exwm-input--line-mode-cache))
+  ;; When the key sequence is complete (not a keymap).
+  ;; Note that `exwm-input--line-mode-cache' might get translated to nil, for
+  ;; example 'mouse--down-1-maybe-follows-link' does this.
+  (unless (and exwm-input--line-mode-cache
+               (keymapp (key-binding exwm-input--line-mode-cache)))
     (setq exwm-input--line-mode-cache nil)
     (when exwm-input--temp-line-mode
       (setq exwm-input--temp-line-mode nil)
       (exwm-input--release-keyboard))))
+
+(defun exwm-input--event-passthrough-p (event)
+  "Whether EVENT should be passed to Emacs.
+Current buffer must be an `exwm-mode' buffer."
+  (or exwm-input-line-mode-passthrough
+      exwm-input--during-command
+      ;; Forward the event when there is an incomplete key
+      ;; sequence or when the minibuffer is active.
+      exwm-input--line-mode-cache
+      (eq (active-minibuffer-window) (selected-window))
+      ;;
+      (memq event exwm-input--global-prefix-keys)
+      (memq event exwm-input-prefix-keys)
+      (when overriding-terminal-local-map
+        (lookup-key overriding-terminal-local-map
+                    (vector event)))
+      (lookup-key (current-local-map) (vector event))
+      (gethash event exwm-input--simulation-keys)))
 
 (defun exwm-input--on-KeyPress-line-mode (key-press raw-data)
   "Parse X KeyPress event to Emacs key event and then feed the command loop."
@@ -589,20 +611,7 @@ instead."
                                   exwm--connection (car keysym)
                                   (logand state (lognot (cdr keysym)))))
                  (setq event (exwm-input--mimic-read-event raw-event))
-                 (or exwm-input-line-mode-passthrough
-                     exwm-input--during-command
-                     ;; Forward the event when there is an incomplete key
-                     ;; sequence or when the minibuffer is active.
-                     exwm-input--line-mode-cache
-                     (eq (active-minibuffer-window) (selected-window))
-                     ;;
-                     (memq event exwm-input--global-prefix-keys)
-                     (memq event exwm-input-prefix-keys)
-                     (when overriding-terminal-local-map
-                       (lookup-key overriding-terminal-local-map
-                                   (vector event)))
-                     (lookup-key (current-local-map) (vector event))
-                     (gethash event exwm-input--simulation-keys)))
+                 (exwm-input--event-passthrough-p event))
         (setq mode xcb:Allow:AsyncKeyboard)
         (exwm-input--cache-event event)
         (exwm-input--unread-event raw-event))
@@ -654,17 +663,49 @@ instead."
                      :time xcb:Time:CurrentTime))
   (xcb:flush exwm--connection))
 
+(defun exwm-input--on-ButtonPress-line-mode (buffer button-event)
+  "Handle button events in line mode.
+BUFFER is the `exwm-mode' buffer the event was generated
+on. BUTTON-EVENT is the X event converted into an Emacs event.
+
+The return value is used as event_mode to release the original
+button event."
+  (with-current-buffer buffer
+    (let ((read-event (exwm-input--mimic-read-event button-event)))
+      (if (and read-event
+               (exwm-input--event-passthrough-p read-event))
+          ;; The event should be forwarded to emacs
+          (progn
+            (exwm-input--cache-event read-event)
+            (exwm-input--unread-event button-event)
+            xcb:Allow:SyncPointer)
+        ;; The event should be replayed
+        xcb:Allow:ReplayPointer))))
+
+(defun exwm-input--on-ButtonPress-char-mode ()
+  "Handle button events in char-mode.
+The return value is used as event_mode to release the original
+button event."
+  xcb:Allow:ReplayPointer)
+
+(defun exwm-input--current-input-mode ()
+  "Return current input mode.
+The return value is one of the symbols \\='line-mode or \\=`char-mode.
+
+Current buffer must be an `exwm-mode' buffer."
+  exwm--input-mode)
+
 (defun exwm-input--update-mode-line (id)
   "Update the propertized `mode-line-process' for window ID."
   (let (help-echo cmd mode)
-    (cl-case exwm--on-KeyPress
-      ((exwm-input--on-KeyPress-line-mode)
+    (cl-case (exwm-input--current-input-mode)
+      (line-mode
        (setq mode "line"
              help-echo "mouse-1: Switch to char-mode"
              cmd `(lambda ()
                     (interactive)
                     (exwm-input-release-keyboard ,id))))
-      ((exwm-input--on-KeyPress-char-mode)
+      (char-mode
        (setq mode "char"
              help-echo "mouse-1: Switch to line-mode"
              cmd `(lambda ()
@@ -680,7 +721,8 @@ instead."
                            (keymap
                             (mode-line
                              keymap
-                             (down-mouse-1 . ,cmd)))))))))
+                             (down-mouse-1 . ,cmd))))))
+      (force-mode-line-update))))
 
 (defun exwm-input--grab-keyboard (&optional id)
   "Grab all key events on window ID."
@@ -697,7 +739,7 @@ instead."
                              :keyboard-mode xcb:GrabMode:Sync))
       (exwm--log "Failed to grab keyboard for #x%x" id))
     (with-current-buffer (exwm--id->buffer id)
-      (setq exwm--on-KeyPress #'exwm-input--on-KeyPress-line-mode))))
+      (setq exwm--input-mode 'line-mode))))
 
 (defun exwm-input--release-keyboard (&optional id)
   "Ungrab all key events on window ID."
@@ -712,7 +754,7 @@ instead."
       (exwm--log "Failed to release keyboard for #x%x" id))
     (exwm-input--grab-global-prefix-keys id)
     (with-current-buffer (exwm--id->buffer id)
-      (setq exwm--on-KeyPress #'exwm-input--on-KeyPress-char-mode))))
+      (setq exwm--input-mode 'char-mode))))
 
 ;;;###autoload
 (defun exwm-input-grab-keyboard (&optional id)
@@ -721,11 +763,8 @@ instead."
                        (exwm--buffer->id (window-buffer)))))
   (when id
     (exwm--log "id=#x%x" id)
-    (with-current-buffer (exwm--id->buffer id)
-      (exwm-input--grab-keyboard id)
-      (setq exwm--keyboard-grabbed t)
-      (exwm-input--update-mode-line id)
-      (force-mode-line-update))))
+    (exwm-input--grab-keyboard id)
+    (exwm-input--update-mode-line id)))
 
 ;;;###autoload
 (defun exwm-input-release-keyboard (&optional id)
@@ -734,11 +773,8 @@ instead."
                        (exwm--buffer->id (window-buffer)))))
   (when id
     (exwm--log "id=#x%x" id)
-    (with-current-buffer (exwm--id->buffer id)
-      (exwm-input--release-keyboard id)
-      (setq exwm--keyboard-grabbed nil)
-      (exwm-input--update-mode-line id)
-      (force-mode-line-update))))
+    (exwm-input--release-keyboard id)
+    (exwm-input--update-mode-line id)))
 
 ;;;###autoload
 (defun exwm-input-toggle-keyboard (&optional id)
@@ -748,9 +784,11 @@ instead."
   (when id
     (exwm--log "id=#x%x" id)
     (with-current-buffer (exwm--id->buffer id)
-      (if exwm--keyboard-grabbed
-          (exwm-input-release-keyboard id)
-        (exwm-reset)))))
+      (cl-case (exwm-input--current-input-mode)
+        (line-mode
+         (exwm-input-release-keyboard id))
+        (char-mode
+         (exwm-reset))))))
 
 (defun exwm-input--fake-key (event)
   "Fake a key event equivalent to Emacs event EVENT."
@@ -1004,8 +1042,6 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
   (when mouse-autoselect-window
     (xcb:+event exwm--connection 'xcb:EnterNotify
                 #'exwm-input--on-EnterNotify))
-  ;; The input focus should be set on the frame when minibuffer is active.
-  (add-hook 'minibuffer-setup-hook #'exwm-input--on-minibuffer-setup)
   ;; Control `exwm-input--during-command'
   (add-hook 'pre-command-hook #'exwm-input--on-pre-command)
   (add-hook 'post-command-hook #'exwm-input--on-post-command)
@@ -1019,7 +1055,6 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
 (defun exwm-input--exit ()
   "Exit the input module."
   (exwm-input--unset-simulation-keys)
-  (remove-hook 'minibuffer-setup-hook #'exwm-input--on-minibuffer-setup)
   (remove-hook 'pre-command-hook #'exwm-input--on-pre-command)
   (remove-hook 'post-command-hook #'exwm-input--on-post-command)
   (remove-hook 'buffer-list-update-hook #'exwm-input--on-buffer-list-update)
