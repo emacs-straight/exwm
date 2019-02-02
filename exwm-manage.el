@@ -1,7 +1,7 @@
 ;;; exwm-manage.el --- Window Management Module for  -*- lexical-binding: t -*-
 ;;;                    EXWM
 
-;; Copyright (C) 2015-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2019 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -217,6 +217,8 @@ You can still make the X windows floating afterwards."
       (exwm--update-hints id)
       (exwm-manage--update-geometry id)
       (exwm-manage--update-mwm-hints id)
+      (exwm--update-title id)
+      (exwm--update-protocols id)
       (setq exwm--configurations (exwm-manage--get-configurations))
       ;; OverrideRedirect is not checked here.
       (when (and
@@ -311,8 +313,6 @@ You can still make the X windows floating afterwards."
                            :button button :modifiers xcb:ModMask:Any)))
       (exwm-manage--set-client-list)
       (xcb:flush exwm--connection)
-      (exwm--update-title id)
-      (exwm--update-protocols id)
       (if (plist-member exwm--configurations 'floating)
           ;; User has specified whether it should be floating.
           (if (plist-get exwm--configurations 'floating)
