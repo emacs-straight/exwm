@@ -140,6 +140,9 @@ defined in `exwm-mode-map' here."
 (defvar exwm-input--update-focus-window nil "The (Emacs) window to be focused.
 This value should always be overwritten.")
 
+(defvar exwm-input--event-hook nil
+  "Hook to run when EXWM receives an event.")
+
 (defvar exwm-workspace--current)
 (declare-function exwm-floating--do-moveresize "exwm-floating.el"
                   (data _synthetic))
@@ -430,7 +433,8 @@ ARGS are additional arguments to CALLBACK."
              (setq mode xcb:Allow:ReplayPointer))))
     (xcb:+request exwm--connection
         (make-instance 'xcb:AllowEvents :mode mode :time xcb:Time:CurrentTime))
-    (xcb:flush exwm--connection)))
+    (xcb:flush exwm--connection))
+  (run-hooks 'exwm-input--event-hook))
 
 (defun exwm-input--on-KeyPress (data _synthetic)
   "Handle KeyPress event."
@@ -444,7 +448,8 @@ ARGS are additional arguments to CALLBACK."
            (exwm-input--on-KeyPress-line-mode obj data))
           (char-mode
            (exwm-input--on-KeyPress-char-mode obj data)))
-      (exwm-input--on-KeyPress-char-mode obj))))
+      (exwm-input--on-KeyPress-char-mode obj)))
+  (run-hooks 'exwm-input--event-hook))
 
 (defun exwm-input--on-CreateNotify (data _synthetic)
   "Handle CreateNotify events."
@@ -542,9 +547,9 @@ instead."
     (exwm-input--update-global-prefix-keys)))
 
 ;; Putting (t . EVENT) into `unread-command-events' does not really work
-;; as documented for Emacs < 27.
+;; as documented for Emacs < 26.2.
 (eval-and-compile
-  (if (< emacs-major-version 27)
+  (if (string-version-lessp emacs-version "26.2")
       (defsubst exwm-input--unread-event (event)
         (setq unread-command-events
               (append unread-command-events (list event))))
@@ -909,14 +914,15 @@ Notes:
 * Setting the value directly (rather than customizing it) after EXWM
   finishes initialization has no effect.
 * Original-keys consist of multiple key events are only supported in Emacs
-  27 and later.
+  26.2 and later.
 * A minority of applications do not accept simulated keys by default.  It's
   required to customize them to accept events sent by SendEvent.
 * The predefined examples in the Customize interface are not guaranteed to
   work for all applications.  This can be tweaked on a per application basis
   with `exwm-input-set-local-simulation-keys'."
-  :type '(alist :key-type (choice (key-sequence :tag "Original"))
-                :value-type (choice (key-sequence :tag "Move left" [left])
+  :type '(alist :key-type (key-sequence :tag "Original")
+                :value-type (choice (key-sequence :tag "User-defined")
+                                    (key-sequence :tag "Move left" [left])
                                     (key-sequence :tag "Move right" [right])
                                     (key-sequence :tag "Move up" [up])
                                     (key-sequence :tag "Move down" [down])
@@ -928,8 +934,7 @@ Notes:
                                     (key-sequence :tag "Paste" [C-v])
                                     (key-sequence :tag "Delete" [delete])
                                     (key-sequence :tag "Delete to EOL"
-                                                  [S-end delete])
-                                    (key-sequence :tag "User-defined")))
+                                                  [S-end delete])))
   :set (lambda (symbol value)
          (set symbol value)
          (exwm-input--set-simulation-keys value)))
@@ -1035,14 +1040,7 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
       (make-instance 'xcb:ewmh:set-_NET_WM_NAME
                      :window exwm-input--timestamp-window
                      :data "EXWM: exwm-input--timestamp-window"))
-  (let ((atom "_TIME"))
-    (setq exwm-input--timestamp-atom
-          (slot-value (xcb:+request-unchecked+reply exwm--connection
-                          (make-instance 'xcb:InternAtom
-                                         :only-if-exists 0
-                                         :name-len (length atom)
-                                         :name atom))
-                      'atom)))
+  (setq exwm-input--timestamp-atom (exwm--intern-atom "_TIME"))
   ;; Initialize global keys.
   (dolist (i exwm-input-global-keys)
     (exwm-input--set-key (car i) (cdr i)))
