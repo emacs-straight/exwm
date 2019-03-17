@@ -157,7 +157,10 @@ NIL if FRAME is not a workspace"
   "Return non-nil if FRAME is an emacsclient frame."
   (frame-parameter frame 'client))
 
-(defvar exwm-workspace--switch-map
+(defvar exwm-workspace--switch-map nil
+  "Keymap used for interactively selecting workspace.")
+
+(defun exwm-workspace--init-switch-map ()
   (let ((map (make-sparse-keymap)))
     (define-key map [t] (lambda () (interactive)))
     (define-key map "+" #'exwm-workspace--prompt-add)
@@ -165,6 +168,17 @@ NIL if FRAME is not a workspace"
     (dotimes (i 10)
       (define-key map (int-to-string i)
         #'exwm-workspace--switch-map-nth-prefix))
+    (unless (eq exwm-workspace-index-map #'number-to-string)
+      ;; Add extra (and possibly override) keys for selecting workspace.
+      (dotimes (i 10)
+        (let ((key (funcall exwm-workspace-index-map i)))
+          (when (and (stringp key)
+                     (= (length key) 1)
+                     (<= 0 (elt key 0) 127))
+            (define-key map key
+              (lambda ()
+                (interactive)
+                (exwm-workspace--switch-map-select-nth i)))))))
     (define-key map "\C-a" (lambda () (interactive) (goto-history-element 1)))
     (define-key map "\C-e" (lambda ()
                              (interactive)
@@ -180,8 +194,7 @@ NIL if FRAME is not a workspace"
     ;; Alternative keys
     (define-key map [right] #'previous-history-element)
     (define-key map [left] #'next-history-element)
-    map)
-  "Keymap used for interactively switch workspace.")
+    (setq exwm-workspace--switch-map map)))
 
 (defun exwm-workspace--workspace-from-frame-or-index (frame-or-index)
   "Retrieve the workspace frame from FRAME-OR-INDEX."
@@ -484,17 +497,17 @@ PREFIX-DIGITS is a list of the digits introduced so far."
       ;; Go ahead if there are enough digits to select any workspace.
       (set-transient-map
        (let ((map (make-sparse-keymap))
-             (cmd `(lambda ()
+             (cmd (let ((digits (cons d prefix-digits)))
+                    (lambda ()
                      (interactive)
-                     (exwm-workspace--switch-map-nth-prefix
-                      ',(cons d prefix-digits)))))
+                     (exwm-workspace--switch-map-nth-prefix digits)))))
          (dotimes (i 10)
            (define-key map (int-to-string i) cmd))
          ;; Accept
          (define-key map [return]
-           `(lambda ()
-              (interactive)
-              (exwm-workspace--switch-map-select-nth ,n)))
+           (lambda ()
+             (interactive)
+             (exwm-workspace--switch-map-select-nth n)))
          map)))))
 
 (defun exwm-workspace--switch-map-select-nth (n)
@@ -1557,6 +1570,7 @@ applied to all subsequently created X frames."
 (defun exwm-workspace--init ()
   "Initialize workspace module."
   (exwm--log)
+  (exwm-workspace--init-switch-map)
   ;; Prevent unexpected exit
   (setq exwm-workspace--fullscreen-frame-count 0)
   (exwm-workspace--modify-all-x-frames-parameters
