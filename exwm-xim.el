@@ -152,8 +152,6 @@ C,no"
 (defvar exwm-xim--property-index 0 "For generating a unique property name.")
 (defvar exwm-xim--im-id 0 "Last IM ID.")
 (defvar exwm-xim--ic-id 0 "Last IC ID.")
-(defvar exwm-xim--event-pending nil
-  "Indicating whether Emacs requires more events.")
 
 ;; X11 atoms.
 (defvar exwm-xim--@server nil)
@@ -490,70 +488,8 @@ The actual XIM request is in client message data or a property."
            (exwm--log "FORWARD-EVENT")
            (setq req (make-instance 'xim:forward-event))
            (xcb:unmarshal req data)
-           (let ((im-func (with-current-buffer (window-buffer)
-                            input-method-function))
-                 key-event keysym event result)
-             ;; Note: The flag slot is ignored.
-             ;; Do conversion in client's byte-order.
-             (let ((xcb:lsb xim:lsb))
-               (setq key-event (make-instance 'xcb:KeyPress))
-               (xcb:unmarshal key-event (slot-value req 'event)))
-             (with-slots (detail state) key-event
-               (setq keysym (xcb:keysyms:keycode->keysym exwm-xim--conn detail
-                                                         state))
-               (when (/= (car keysym) 0)
-                 (setq event (xcb:keysyms:keysym->event
-                              exwm-xim--conn
-                              (car keysym)
-                              (logand state (lognot (cdr keysym)))))))
-             (if exwm-xim--event-pending
-                 ;; In case any event reaches here, it should be forwarded
-                 ;; to Emacs.
-                 (when event
-                   (setq unread-command-events
-                         (append unread-command-events (list event))))
-               (setq exwm-xim--event-pending t)
-               (if (or (not im-func)
-                       ;; `list' is the default method.
-                       (eq im-func #'list)
-                       (not event)
-                       ;; Select only printable keys.
-                       (not (integerp event)) (> #x20 event) (< #x7e event))
-                   ;; Either there is no active input method, or invalid key
-                   ;; is detected.
-                   (with-slots (im-id ic-id serial-number event) req
-                     (push (make-instance 'xim:forward-event
-                                          :im-id im-id
-                                          :ic-id ic-id
-                                          :flag xim:commit-flag:synchronous
-                                          :serial-number serial-number
-                                          :event event)
-                           replies))
-                 (when (eq exwm--selected-input-mode 'char-mode)
-                   ;; Grab keyboard temporarily for char-mode.
-                   (exwm-input--grab-keyboard))
-                 (unwind-protect
-                     (with-temp-buffer
-                       ;; Always show key strokes.
-                       (let ((input-method-use-echo-area t))
-                         (setq result (funcall im-func event))))
-                   (when (eq exwm--selected-input-mode 'char-mode)
-                     (exwm-input--release-keyboard)))
-                 ;; This also works for portable character encoding.
-                 (setq result
-                       (encode-coding-string (concat result)
-                                             'compound-text-with-extensions))
-                 (message "")
-                 (push
-                  (make-instance 'xim:commit-x-lookup-chars
-                                 :im-id (slot-value req 'im-id)
-                                 :ic-id (slot-value req 'ic-id)
-                                 :flag (logior xim:commit-flag:synchronous
-                                               xim:commit-flag:x-lookup-chars)
-                                 :length (length result)
-                                 :string result)
-                  replies))
-               (setq exwm-xim--event-pending nil))))
+           (exwm-xim--handle-forward-event-request req xim:lsb conn
+                                                   client-xwin))
           ((= opcode xim:opcode:sync)
            (exwm--log "SYNC")
            (setq req (make-instance 'xim:sync))
@@ -590,6 +526,75 @@ The actual XIM request is in client message data or a property."
               (exwm-xim--make-request reply conn client-xwin))
             replies)
       (xcb:flush conn))))
+
+(defun exwm-xim--handle-forward-event-request (req lsb conn client-xwin)
+  (let ((im-func (with-current-buffer (window-buffer)
+                   input-method-function))
+        key-event keysym event result)
+    ;; Note: The flag slot is ignored.
+    ;; Do conversion in client's byte-order.
+    (let ((xcb:lsb lsb))
+      (setq key-event (make-instance 'xcb:KeyPress))
+      (xcb:unmarshal key-event (slot-value req 'event)))
+    (with-slots (detail state) key-event
+      (setq keysym (xcb:keysyms:keycode->keysym exwm-xim--conn detail
+                                                state))
+      (when (/= (car keysym) 0)
+        (setq event (xcb:keysyms:keysym->event
+                     exwm-xim--conn
+                     (car keysym)
+                     (logand state (lognot (cdr keysym)))))))
+    (if (or (not im-func)
+            ;; `list' is the default method.
+            (eq im-func #'list)
+            (not event)
+            ;; Select only printable keys.
+            (not (integerp event)) (> #x20 event) (< #x7e event))
+        ;; Either there is no active input method, or invalid key
+        ;; is detected.
+        (with-slots (im-id ic-id serial-number event) req
+          (exwm-xim--make-request
+           (make-instance 'xim:forward-event
+                          :im-id im-id
+                          :ic-id ic-id
+                          :flag xim:commit-flag:synchronous
+                          :serial-number serial-number
+                          :event event)
+           conn client-xwin)
+          (xcb:flush conn))
+      (when (eq exwm--selected-input-mode 'char-mode)
+        ;; Grab keyboard temporarily for char-mode.
+        (exwm-input--grab-keyboard))
+      (unwind-protect
+          (with-temp-buffer
+            ;; Always show key strokes.
+            (let ((input-method-use-echo-area t))
+              (while (or event unread-command-events)
+                (unless event
+                  (setq event (pop unread-command-events)))
+                ;; `quail-input-method' seems to unread 'return instead of
+                ;; ?\n hence this conversion.
+                (when (eq event 'return)
+                  (setq event ?\n))
+                (when (characterp event)
+                  (setq result (funcall im-func event))
+                  ;; This also works for portable character encoding.
+                  (setq result
+                        (encode-coding-string (concat result)
+                                              'compound-text-with-extensions))
+                  (exwm-xim--make-request
+                   (make-instance 'xim:commit-x-lookup-chars
+                                  :im-id (slot-value req 'im-id)
+                                  :ic-id (slot-value req 'ic-id)
+                                  :flag (logior xim:commit-flag:synchronous
+                                                xim:commit-flag:x-lookup-chars)
+                                  :length (length result)
+                                  :string result)
+                   conn client-xwin)
+                  (xcb:flush conn))
+                (setq event nil))))
+        (when (eq exwm--selected-input-mode 'char-mode)
+          (exwm-input--release-keyboard))))))
 
 (defun exwm-xim--make-request (req conn client-xwin)
   "Make an XIM request REQ via connection CONN.
