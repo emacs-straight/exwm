@@ -960,6 +960,10 @@ Notes:
          (set symbol value)
          (exwm-input--set-simulation-keys value)))
 
+(defcustom exwm-input-pre-post-command-blacklist '(exit-minibuffer)
+  "Commands impossible to detect with `post-command-hook'."
+  :type '(repeat function))
+
 (cl-defun exwm-input--read-keys (prompt stop-key)
   (let ((cursor-in-echo-area t)
         keys key)
@@ -1029,7 +1033,7 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
 
 (defun exwm-input--on-pre-command ()
   "Run in `pre-command-hook'."
-  (unless (eq this-command #'exit-minibuffer)
+  (unless (memq this-command exwm-input-pre-post-command-blacklist)
     (setq exwm-input--during-command t)))
 
 (defun exwm-input--on-post-command ()
@@ -1042,6 +1046,7 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
   (with-current-buffer
       (window-buffer (frame-selected-window exwm-workspace--current))
     (when (and (derived-mode-p 'exwm-mode)
+               (not (exwm-workspace--client-p))
                (eq exwm--selected-input-mode 'char-mode))
       (exwm-input--grab-keyboard exwm--id))))
 
@@ -1051,6 +1056,7 @@ where both ORIGINAL-KEY and SIMULATED-KEY are key sequences."
   (with-current-buffer
       (window-buffer (frame-selected-window exwm-workspace--current))
     (when (and (derived-mode-p 'exwm-mode)
+               (not (exwm-workspace--client-p))
                (eq exwm--selected-input-mode 'char-mode)
                (eq exwm--input-mode 'line-mode))
       (exwm-input--release-keyboard exwm--id))))
