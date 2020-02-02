@@ -1,6 +1,6 @@
 ;;; exwm-core.el --- Core definitions  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2015-2019 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2020 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -183,6 +183,15 @@ least SECS seconds later."
           xcb:EventMask:PropertyChange
           (if mouse-autoselect-window
               xcb:EventMask:EnterWindow 0)))
+
+(defun exwm--color->pixel (color)
+  "Convert COLOR to PIXEL (index in TrueColor colormap)."
+  (when (and color
+             (eq (x-display-visual-class) 'true-color))
+    (let ((rgb (x-color-values color)))
+      (logior (lsh (lsh (pop rgb) -8) 16)
+              (lsh (lsh (pop rgb) -8) 8)
+              (lsh (pop rgb) -8)))))
 
 ;; Internal variables
 (defvar-local exwm--id nil)               ;window ID
