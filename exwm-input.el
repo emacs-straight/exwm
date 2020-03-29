@@ -688,9 +688,10 @@ Current buffer must be an `exwm-mode' buffer."
               (set-transient-map `(keymap (t . ,#'exwm-input--noop)))
               (exwm-input--unread-event event))
           ;; Fool some packages into thinking there is a change in the buffer.
-          (setq last-command #'exwm-input--noop)
-          (run-hooks 'pre-command-hook)
-          (run-hooks 'post-command-hook)))
+          (when event
+            (setq last-command #'exwm-input--noop)
+            (run-hooks 'pre-command-hook)
+            (run-hooks 'post-command-hook))))
       (xcb:+request exwm--connection
           (make-instance 'xcb:AllowEvents
                          :mode mode
@@ -749,20 +750,20 @@ button event."
   "Update the propertized `mode-line-process' for window ID."
   (exwm--log "#x%x" id)
   (let (help-echo cmd mode)
-    (cl-case exwm--input-mode
-      (line-mode
-       (setq mode "line"
-             help-echo "mouse-1: Switch to char-mode"
-             cmd (lambda ()
-                   (interactive)
-                   (exwm-input-release-keyboard id))))
-      (char-mode
-       (setq mode "char"
-             help-echo "mouse-1: Switch to line-mode"
-             cmd (lambda ()
-                   (interactive)
-                   (exwm-input-grab-keyboard id)))))
     (with-current-buffer (exwm--id->buffer id)
+      (cl-case exwm--input-mode
+        (line-mode
+         (setq mode "line"
+               help-echo "mouse-1: Switch to char-mode"
+               cmd (lambda ()
+                     (interactive)
+                     (exwm-input-release-keyboard id))))
+        (char-mode
+         (setq mode "char"
+               help-echo "mouse-1: Switch to line-mode"
+               cmd (lambda ()
+                     (interactive)
+                     (exwm-input-grab-keyboard id)))))
       (setq mode-line-process
             `(": "
               (:propertize ,mode
