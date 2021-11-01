@@ -1,10 +1,10 @@
 ;;; exwm.el --- Emacs X Window Manager  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2015-2020 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2021 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
-;; Maintainer: Chris Feng <chris.w.feng@gmail.com>
-;; Version: 0.24
+;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>
+;; Version: 0.25
 ;; Package-Requires: ((xelb "0.18"))
 ;; Keywords: unix
 ;; URL: https://github.com/ch11ng/exwm
