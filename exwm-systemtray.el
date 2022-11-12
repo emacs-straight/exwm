@@ -1,7 +1,7 @@
 ;;; exwm-systemtray.el --- System Tray Module for  -*- lexical-binding: t -*-
 ;;;                        EXWM
 
-;; Copyright (C) 2016-2021 Free Software Foundation, Inc.
+;; Copyright (C) 2016-2022 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -30,6 +30,7 @@
 
 ;;; Code:
 
+(require 'xcb-ewmh)
 (require 'xcb-icccm)
 (require 'xcb-xembed)
 (require 'xcb-systemtray)
@@ -67,43 +68,48 @@ You shall use the default value if using auto-hide minibuffer."
   "Gap between icons."
   :type 'integer)
 
+(defvar exwm-systemtray--connection nil "The X connection.")
+
 (defvar exwm-systemtray--embedder-window nil "The embedder window.")
+(defvar exwm-systemtray--embedder-window-depth nil
+  "The embedder window's depth.")
 
-(defcustom exwm-systemtray-background-color nil
+(defcustom exwm-systemtray-background-color 'workspace-background
   "Background color of systemtray.
+This should be a color, the symbol `workspace-background' for the background
+color of current workspace frame, or the symbol `transparent' for transparent
+background.
 
-This should be a color, or nil for transparent background."
-  :type '(choice (const :tag "Transparent" nil)
-                 (color))
+Transparent background is not yet supported when Emacs uses 32-bit depth
+visual, as reported by `x-display-planes'.  The X resource \"Emacs.visualClass:
+TrueColor-24\" can be used to force Emacs to use 24-bit depth."
+  :type '(choice (const :tag "Transparent" transparent)
+                 (const :tag "Frame background" workspace-background)
+                 (color :tag "Color"))
   :initialize #'custom-initialize-default
   :set (lambda (symbol value)
+         (when (and (eq value 'transparent)
+                    (not (exwm-systemtray--transparency-supported-p)))
+           (display-warning 'exwm-systemtray
+                            "Transparent background is not supported yet when \
+using 32-bit depth.  Using `workspace-background' instead.")
+           (setq value 'workspace-background))
          (set-default symbol value)
-         ;; Change the background color for embedder.
-         (when (and exwm--connection
+         (when (and exwm-systemtray--connection
                     exwm-systemtray--embedder-window)
-           (let ((background-pixel (exwm--color->pixel value)))
-             (xcb:+request exwm--connection
-                 (make-instance 'xcb:ChangeWindowAttributes
-                                :window exwm-systemtray--embedder-window
-                                :value-mask (logior xcb:CW:BackPixmap
-                                                    (if background-pixel
-                                                        xcb:CW:BackPixel 0))
-                                :background-pixmap
-                                xcb:BackPixmap:ParentRelative
-                                :background-pixel background-pixel))
-             ;; Unmap & map to take effect immediately.
-             (xcb:+request exwm--connection
-                 (make-instance 'xcb:UnmapWindow
-                                :window exwm-systemtray--embedder-window))
-             (xcb:+request exwm--connection
-                 (make-instance 'xcb:MapWindow
-                                :window exwm-systemtray--embedder-window))
-             (xcb:flush exwm--connection)))))
+           ;; Change the background color for embedder.
+           (exwm-systemtray--set-background-color)
+           ;; Unmap & map to take effect immediately.
+           (xcb:+request exwm-systemtray--connection
+                         (make-instance 'xcb:UnmapWindow
+                                        :window exwm-systemtray--embedder-window))
+           (xcb:+request exwm-systemtray--connection
+                         (make-instance 'xcb:MapWindow
+                                        :window exwm-systemtray--embedder-window))
+           (xcb:flush exwm-systemtray--connection))))
 
 ;; GTK icons require at least 16 pixels to show normally.
 (defconst exwm-systemtray--icon-min-size 16 "Minimum icon size.")
-
-(defvar exwm-systemtray--connection nil "The X connection.")
 
 (defvar exwm-systemtray--list nil "The icon list.")
 
@@ -249,6 +255,80 @@ This should be a color, or nil for transparent background."
                          :window exwm-systemtray--embedder-window))))
   (xcb:flush exwm-systemtray--connection))
 
+(defun exwm-systemtray--refresh-background-color (&optional remap)
+  "Refresh background color after theme change or workspace switch.
+If REMAP is not nil, map and unmap the embedder window so that the background is
+redrawn."
+  ;; Only `workspace-background' is dependent on current theme and workspace.
+  (when (eq 'workspace-background exwm-systemtray-background-color)
+    (exwm-systemtray--set-background-color)
+    (when remap
+      (xcb:+request exwm-systemtray--connection
+                    (make-instance 'xcb:UnmapWindow
+                                   :window exwm-systemtray--embedder-window))
+      (xcb:+request exwm-systemtray--connection
+                    (make-instance 'xcb:MapWindow
+                                   :window exwm-systemtray--embedder-window))
+      (xcb:flush exwm-systemtray--connection))))
+
+(defun exwm-systemtray--set-background-color ()
+  "Change the background color of the embedder.
+The color is set according to `exwm-systemtray-background-color'.
+
+Note that this function does not change the current contents of the embedder
+window; unmap & map are necessary for the background color to take effect."
+  (when (and exwm-systemtray--connection
+             exwm-systemtray--embedder-window)
+    (let* ((color (cl-case exwm-systemtray-background-color
+                    ((transparent nil) ; nil means transparent as well
+                     (if (exwm-systemtray--transparency-supported-p)
+                         nil
+                       (message "%s" "[EXWM] system tray does not support \
+`transparent' background; using `workspace-background' instead")
+                       (face-background 'default exwm-workspace--current)))
+                    (workspace-background
+                     (face-background 'default exwm-workspace--current))
+                    (t exwm-systemtray-background-color)))
+           (background-pixel (exwm--color->pixel color)))
+      (xcb:+request exwm-systemtray--connection
+                    (make-instance 'xcb:ChangeWindowAttributes
+                                   :window exwm-systemtray--embedder-window
+                                   ;; Either-or.  A `background-pixel' of nil
+                                   ;; means simulate transparency.  We use
+                                   ;; `xcb:CW:BackPixmap' together with
+                                   ;; `xcb:BackPixmap:ParentRelative' do that,
+                                   ;; but this only works when the parent
+                                   ;; window's visual (Emacs') has the same
+                                   ;; visual depth.
+                                   :value-mask (if background-pixel
+                                                   xcb:CW:BackPixel
+                                                 xcb:CW:BackPixmap)
+                                   ;; Due to the :value-mask above,
+                                   ;; :background-pixmap only takes effect when
+                                   ;; `transparent' is requested and supported
+                                   ;; (visual depth of Emacs and of system tray
+                                   ;; are equal).  Setting
+                                   ;; `xcb:BackPixmap:ParentRelative' when
+                                   ;; that's not the case would produce an
+                                   ;; `xcb:Match' error.
+                                   :background-pixmap xcb:BackPixmap:ParentRelative
+                                   :background-pixel background-pixel)))))
+
+(defun exwm-systemtray--transparency-supported-p ()
+  "Check whether transparent background is supported.
+EXWM system tray supports transparency when the visual depth of the system tray
+window matches that of Emacs.  The visual depth of the system tray window is the
+default visual depth of the display.
+
+Sections \"Visual and background pixmap handling\" and
+\"_NET_SYSTEM_TRAY_VISUAL\" of the System Tray Protocol Specification
+\(https://specifications.freedesktop.org/systemtray-spec/systemtray-spec-latest.html#visuals)
+indicate how to support actual transparency."
+  (let ((planes (x-display-planes)))
+    (if exwm-systemtray--embedder-window-depth
+        (= planes exwm-systemtray--embedder-window-depth)
+      (<= planes 24))))
+
 (defun exwm-systemtray--on-DestroyNotify (data _synthetic)
   "Unembed icons on DestroyNotify."
   (exwm--log)
@@ -375,7 +455,12 @@ This should be a color, or nil for transparent background."
                                   3)
                              exwm-workspace--frame-y-offset
                              exwm-systemtray-height))))
+  (exwm-systemtray--refresh-background-color)
   (exwm-systemtray--refresh))
+
+(defun exwm-systemtray--on-theme-change (_theme)
+  "Refresh system tray upon theme change."
+  (exwm-systemtray--refresh-background-color 'remap))
 
 (defun exwm-systemtray--refresh-all ()
   "Reposition/Refresh the system tray."
@@ -469,8 +554,7 @@ This should be a color, or nil for transparent background."
                        :data xcb:systemtray:ORIENTATION:HORZ)))
   ;; Create the embedder.
   (let ((id (xcb:generate-id exwm-systemtray--connection))
-        (background-pixel (exwm--color->pixel exwm-systemtray-background-color))
-        frame parent depth y)
+        frame parent embedder-depth embedder-visual embedder-colormap y)
     (setq exwm-systemtray--embedder-window id)
     (if (exwm-workspace--minibuffer-own-frame-p)
         (setq frame exwm-workspace--minibuffer
@@ -487,15 +571,21 @@ This should be a color, or nil for transparent background."
                       3)
                  exwm-workspace--frame-y-offset
                  exwm-systemtray-height)))
-    (setq parent (string-to-number (frame-parameter frame 'window-id))
-          depth (slot-value (xcb:+request-unchecked+reply
-                                exwm-systemtray--connection
-                                (make-instance 'xcb:GetGeometry
-                                               :drawable parent))
-                            'depth))
+    (setq parent (string-to-number (frame-parameter frame 'window-id)))
+    ;; Use default depth, visual and colormap (from root window), instead of
+    ;; Emacs frame's.  See Section "Visual and background pixmap handling" in
+    ;; "System Tray Protocol Specification 0.3".
+    (let* ((vdc (exwm--get-visual-depth-colormap exwm-systemtray--connection
+                                                 exwm--root)))
+      (setq embedder-visual (car vdc))
+      (setq embedder-depth (cadr vdc))
+      (setq embedder-colormap (caddr vdc)))
+    ;; Note down the embedder window's depth.  It will be used to check whether
+    ;; we can use xcb:BackPixmap:ParentRelative to emulate transparency.
+    (setq exwm-systemtray--embedder-window-depth embedder-depth)
     (xcb:+request exwm-systemtray--connection
         (make-instance 'xcb:CreateWindow
-                       :depth depth
+                       :depth embedder-depth
                        :wid id
                        :parent parent
                        :x 0
@@ -504,19 +594,29 @@ This should be a color, or nil for transparent background."
                        :height exwm-systemtray-height
                        :border-width 0
                        :class xcb:WindowClass:InputOutput
-                       :visual 0
-                       :value-mask (logior xcb:CW:BackPixmap
-                                           (if background-pixel
-                                               xcb:CW:BackPixel 0)
+                       :visual embedder-visual
+                       :colormap embedder-colormap
+                       :value-mask (logior xcb:CW:BorderPixel
+                                           xcb:CW:Colormap
                                            xcb:CW:EventMask)
-                       :background-pixmap xcb:BackPixmap:ParentRelative
-                       :background-pixel background-pixel
+                       :border-pixel 0
                        :event-mask xcb:EventMask:SubstructureNotify))
+    (exwm-systemtray--set-background-color)
     ;; Set _NET_WM_NAME.
     (xcb:+request exwm-systemtray--connection
         (make-instance 'xcb:ewmh:set-_NET_WM_NAME
                        :window id
-                       :data "EXWM: exwm-systemtray--embedder-window")))
+                       :data "EXWM: exwm-systemtray--embedder-window"))
+    ;; Set _NET_WM_WINDOW_TYPE.
+    (xcb:+request exwm-systemtray--connection
+        (make-instance 'xcb:ewmh:set-_NET_WM_WINDOW_TYPE
+                       :window id
+                       :data (vector xcb:Atom:_NET_WM_WINDOW_TYPE_DOCK)))
+    ;; Set _NET_SYSTEM_TRAY_VISUAL.
+    (xcb:+request exwm-systemtray--connection
+        (make-instance 'xcb:xembed:set-_NET_SYSTEM_TRAY_VISUAL
+                       :window exwm-systemtray--selection-owner-window
+                       :data embedder-visual)))
   (xcb:flush exwm-systemtray--connection)
   ;; Attach event listeners.
   (xcb:+event exwm-systemtray--connection 'xcb:DestroyNotify
@@ -536,6 +636,9 @@ This should be a color, or nil for transparent background."
   (add-hook 'exwm-workspace-switch-hook #'exwm-systemtray--on-workspace-switch)
   (add-hook 'exwm-workspace--update-workareas-hook
             #'exwm-systemtray--refresh-all)
+  ;; Add hook to update background colors.
+  (add-hook 'enable-theme-functions #'exwm-systemtray--on-theme-change)
+  (add-hook 'disable-theme-functions #'exwm-systemtray--on-theme-change)
   (add-hook 'menu-bar-mode-hook #'exwm-systemtray--refresh-all)
   (add-hook 'tool-bar-mode-hook #'exwm-systemtray--refresh-all)
   (when (boundp 'exwm-randr-refresh-hook)
@@ -564,11 +667,14 @@ This should be a color, or nil for transparent background."
     (setq exwm-systemtray--connection nil
           exwm-systemtray--list nil
           exwm-systemtray--selection-owner-window nil
-          exwm-systemtray--embedder-window nil)
+          exwm-systemtray--embedder-window nil
+          exwm-systemtray--embedder-window-depth nil)
     (remove-hook 'exwm-workspace-switch-hook
                  #'exwm-systemtray--on-workspace-switch)
     (remove-hook 'exwm-workspace--update-workareas-hook
                  #'exwm-systemtray--refresh-all)
+    (remove-hook 'enable-theme-functions #'exwm-systemtray--on-theme-change)
+    (remove-hook 'disable-theme-functions #'exwm-systemtray--on-theme-change)
     (remove-hook 'menu-bar-mode-hook #'exwm-systemtray--refresh-all)
     (remove-hook 'tool-bar-mode-hook #'exwm-systemtray--refresh-all)
     (when (boundp 'exwm-randr-refresh-hook)
