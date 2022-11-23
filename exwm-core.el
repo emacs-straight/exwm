@@ -59,6 +59,9 @@ Here are some predefined candidates:
 
 (defvar exwm--connection nil "X connection.")
 
+(defvar exwm--terminal nil
+  "Terminal corresponding to `exwm--connection'.")
+
 (defvar exwm--wmsn-window nil
   "An X window owning the WM_S0 selection.")
 
@@ -155,9 +158,9 @@ Nil can be passed as placeholder."
                                          (if height xcb:ConfigWindow:Height 0))
                      :x x :y y :width width :height height)))
 
-(defun exwm--intern-atom (atom)
+(defun exwm--intern-atom (atom &optional conn)
   "Intern X11 ATOM."
-  (slot-value (xcb:+request-unchecked+reply exwm--connection
+  (slot-value (xcb:+request-unchecked+reply (or conn exwm--connection)
                   (make-instance 'xcb:InternAtom
                                  :only-if-exists 0
                                  :name-len (length atom)
@@ -176,6 +179,11 @@ least SECS seconds later."
                         nil
                         ,function
                         ,@args))
+
+(defsubst exwm--terminal-p (&optional frame)
+  "Return t when FRAME's terminal is EXWM's terminal.
+If FRAME is null, use selected frame."
+  (eq exwm--terminal (frame-terminal frame)))
 
 (defun exwm--get-client-event-mask ()
   "Return event mask set on all managed windows."

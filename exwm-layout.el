@@ -57,8 +57,6 @@
 (declare-function exwm-input--grab-keyboard "exwm-input.el")
 (declare-function exwm-input-grab-keyboard "exwm-input.el")
 (declare-function exwm-workspace--active-p "exwm-workspace.el" (frame))
-(declare-function exwm-workspace--client-p "exwm-workspace.el"
-                  (&optional frame))
 (declare-function exwm-workspace--minibuffer-own-frame-p "exwm-workspace.el")
 (declare-function exwm-workspace--workspace-p "exwm-workspace.el"
                   (workspace))
@@ -405,22 +403,28 @@ selected by `other-buffer'."
 (defun exwm-layout--on-minibuffer-setup ()
   "Refresh layout when minibuffer grows."
   (exwm--log)
-  (unless (exwm-workspace--client-p)
-    (exwm--defer 0 (lambda ()
-                     (when (< 1 (window-height (minibuffer-window)))
-                       (exwm-layout--refresh))))))
+  ;; Only when active minibuffer's frame is an EXWM frame.
+  (let* ((mini-window (active-minibuffer-window))
+         (frame (window-frame mini-window)))
+    (when (exwm-workspace--workspace-p frame)
+      (exwm--defer 0 (lambda ()
+                       (when (< 1 (window-height mini-window)))
+                       (exwm-layout--refresh frame))))))
 
 (defun exwm-layout--on-echo-area-change (&optional dirty)
   "Run when message arrives or in `echo-area-clear-hook' to refresh layout."
-  (when (and (current-message)
-             (not (exwm-workspace--client-p))
-             (or (cl-position ?\n (current-message))
-                 (> (length (current-message))
-                    (frame-width exwm-workspace--current))))
-    (exwm--log)
-    (if dirty
-        (exwm-layout--refresh)
-      (exwm--defer 0 #'exwm-layout--refresh))))
+  (let ((frame (window-frame (active-minibuffer-window)))
+        (msg (current-message)))
+    ;; Check whether the frame where current window's minibuffer resides (not
+    ;; current window's frame for floating windows!) must be adjusted.
+    (when (and msg
+               (exwm-workspace--workspace-p frame)
+               (or (cl-position ?\n msg)
+                   (> (length msg) (frame-width frame))))
+      (exwm--log)
+      (if dirty
+          (exwm-layout--refresh exwm-workspace--current)
+        (exwm--defer 0 #'exwm-layout--refresh exwm-workspace--current)))))
 
 ;;;###autoload
 (defun exwm-layout-enlarge-window (delta &optional horizontal)
