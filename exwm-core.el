@@ -1,6 +1,6 @@
 ;;; exwm-core.el --- Core definitions  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2015-2021 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2023 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -93,10 +93,12 @@ Here are some predefined candidates:
                   (frame-or-index &optional id))
 
 (define-minor-mode exwm-debug
-  "Debug-logging enabled if non-nil"
-  :global t)
+  "Debug-logging enabled if non-nil."
+  :global t
+  :group 'exwm-debug)
 
 (defmacro exwm--debug (&rest forms)
+  "Evaluate FORMS if mode `exwm-debug' is active."
   (when exwm-debug `(progn ,@forms)))
 
 (defmacro exwm--log (&optional format-string &rest objects)
@@ -116,10 +118,12 @@ FORMAT-STRING is a string specifying the message to output, as in
 
 (defsubst exwm--id->buffer (id)
   "X window ID => Emacs buffer."
+  (declare (indent defun))
   (cdr (assoc id exwm--id-buffer-alist)))
 
 (defsubst exwm--buffer->id (buffer)
   "Emacs buffer BUFFER => X window ID."
+  (declare (indent defun))
   (car (rassoc buffer exwm--id-buffer-alist)))
 
 (defun exwm--lock (&rest _args)
@@ -159,7 +163,9 @@ Nil can be passed as placeholder."
                      :x x :y y :width width :height height)))
 
 (defun exwm--intern-atom (atom &optional conn)
-  "Intern X11 ATOM."
+  "Intern X11 ATOM.
+If CONN is non-nil, use it instead of the value of the variable
+`exwm--connection'."
   (slot-value (xcb:+request-unchecked+reply (or conn exwm--connection)
                   (make-instance 'xcb:InternAtom
                                  :only-if-exists 0
@@ -183,6 +189,7 @@ least SECS seconds later."
 (defsubst exwm--terminal-p (&optional frame)
   "Return t when FRAME's terminal is EXWM's terminal.
 If FRAME is null, use selected frame."
+  (declare (indent defun))
   (eq exwm--terminal (frame-terminal frame)))
 
 (defun exwm--get-client-event-mask ()
@@ -197,13 +204,16 @@ If FRAME is null, use selected frame."
   (when (and color
              (eq (x-display-visual-class) 'true-color))
     (let ((rgb (x-color-values color)))
-      (logior (lsh (lsh (pop rgb) -8) 16)
-              (lsh (lsh (pop rgb) -8) 8)
-              (lsh (pop rgb) -8)))))
+      (logior (ash (ash (pop rgb) -8) 16)
+              (ash (ash (pop rgb) -8) 8)
+              (ash (pop rgb) -8)))))
 
 (defun exwm--get-visual-depth-colormap (conn id)
   "Get visual, depth and colormap from X window ID.
-Return a three element list with the respective results."
+Return a three element list with the respective results.
+
+If CONN is non-nil, use it instead of the value of the variable
+`exwm--connection'."
   (let (ret-visual ret-depth ret-colormap)
     (with-slots (visual colormap)
         (xcb:+request-unchecked+reply conn
@@ -235,7 +245,7 @@ One of `line-mode' or `char-mode'.")
 (defvar-local exwm--geometry nil)
 (defvar-local exwm-class-name nil "Class name in WM_CLASS.")
 (defvar-local exwm-instance-name nil "Instance name in WM_CLASS.")
-(defvar-local exwm-title nil "Window title (either _NET_WM_NAME or WM_NAME)")
+(defvar-local exwm-title nil "Window title (either _NET_WM_NAME or WM_NAME).")
 (defvar-local exwm--title-is-utf8 nil)
 (defvar-local exwm-transient-for nil "WM_TRANSIENT_FOR.")
 (defvar-local exwm--protocols nil)

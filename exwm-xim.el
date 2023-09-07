@@ -1,6 +1,6 @@
 ;;; exwm-xim.el --- XIM Module for EXWM  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2019-2021 Free Software Foundation, Inc.
+;; Copyright (C) 2019-2023 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -68,7 +68,7 @@
 
 ;;; Code:
 
-(eval-when-compile (require 'cl-lib))
+(require 'cl-lib)
 
 (require 'xcb-keysyms)
 (require 'xcb-xim)
@@ -167,6 +167,7 @@ C,no"
 
 (defun exwm-xim--on-SelectionRequest (data _synthetic)
   "Handle SelectionRequest events on IMS window.
+DATA contains unmarshalled SelectionRequest event data.
 
 Such events would be received when clients query for LOCALES or TRANSPORT."
   (exwm--log)
@@ -754,10 +755,12 @@ Such event would be received when the client window is destroyed."
   ;; Close IMS communication connections.
   (mapc (lambda (i)
           (when (vectorp i)
-            (xcb:disconnect (elt i 0))))
+            (when (slot-value (elt i 0) 'connected)
+              (xcb:disconnect (elt i 0)))))
         exwm-xim--server-client-plist)
   ;; Close the IMS connection.
-  (unless exwm-xim--conn
+  (unless (and exwm-xim--conn
+               (slot-value exwm-xim--conn 'connected))
     (cl-return-from exwm-xim--exit))
   ;; Remove exwm-xim from XIM_SERVERS.
   (let ((reply (xcb:+request-unchecked+reply exwm-xim--conn

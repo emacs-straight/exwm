@@ -1,7 +1,7 @@
 ;;; exwm-systemtray.el --- System Tray Module for  -*- lexical-binding: t -*-
 ;;;                        EXWM
 
-;; Copyright (C) 2016-2022 Free Software Foundation, Inc.
+;; Copyright (C) 2016-2023 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -38,6 +38,8 @@
 (require 'exwm-core)
 (require 'exwm-workspace)
 
+(declare-function exwm-workspace--workarea "exwm-workspace.el" (frame))
+
 (defclass exwm-systemtray--icon ()
   ((width :initarg :width)
    (height :initarg :height)
@@ -47,7 +49,7 @@
 (defclass xcb:systemtray:-ClientMessage
   (xcb:icccm:--ClientMessage xcb:ClientMessage)
   ((format :initform 32)
-   (type :initform xcb:Atom:MANAGER)
+   (type :initform 'xcb:Atom:MANAGER)
    (time :initarg :time :type xcb:TIMESTAMP)      ;new slot
    (selection :initarg :selection :type xcb:ATOM) ;new slot
    (owner :initarg :owner :type xcb:WINDOW))      ;new slot
@@ -119,7 +121,7 @@ using 32-bit depth.  Using `workspace-background' instead.")
 (defvar xcb:Atom:_NET_SYSTEM_TRAY_S0)
 
 (defun exwm-systemtray--embed (icon)
-  "Embed an icon."
+  "Embed an ICON."
   (exwm--log "Try to embed #x%x" icon)
   (let ((info (xcb:+request-unchecked+reply exwm-systemtray--connection
                   (make-instance 'xcb:xembed:get-_XEMBED_INFO
@@ -208,7 +210,7 @@ using 32-bit depth.  Using `workspace-background' instead.")
       (exwm-systemtray--refresh))))
 
 (defun exwm-systemtray--unembed (icon)
-  "Unembed an icon."
+  "Unembed an ICON."
   (exwm--log "Unembed #x%x" icon)
   (xcb:+request exwm-systemtray--connection
       (make-instance 'xcb:UnmapWindow :window icon))
@@ -240,14 +242,13 @@ using 32-bit depth.  Using `workspace-background' instead.")
         (setq x (+ x (slot-value (cdr pair) 'width)
                    exwm-systemtray-icon-gap))
         (setq map t)))
-    (let ((workarea (elt exwm-workspace--workareas
-                         exwm-workspace-current-index)))
+    (let ((workarea (exwm-workspace--workarea exwm-workspace-current-index)))
       (xcb:+request exwm-systemtray--connection
           (make-instance 'xcb:ConfigureWindow
                          :window exwm-systemtray--embedder-window
                          :value-mask (logior xcb:ConfigWindow:X
                                              xcb:ConfigWindow:Width)
-                         :x (- (aref workarea 2) x)
+                         :x (- (slot-value workarea 'width) x)
                          :width x)))
     (when map
       (xcb:+request exwm-systemtray--connection
@@ -330,7 +331,8 @@ indicate how to support actual transparency."
       (<= planes 24))))
 
 (defun exwm-systemtray--on-DestroyNotify (data _synthetic)
-  "Unembed icons on DestroyNotify."
+  "Unembed icons on DestroyNotify.
+Argument DATA contains the raw event data."
   (exwm--log)
   (let ((obj (make-instance 'xcb:DestroyNotify)))
     (xcb:unmarshal obj data)
@@ -339,7 +341,8 @@ indicate how to support actual transparency."
         (exwm-systemtray--unembed window)))))
 
 (defun exwm-systemtray--on-ReparentNotify (data _synthetic)
-  "Unembed icons on ReparentNotify."
+  "Unembed icons on ReparentNotify.
+Argument DATA contains the raw event data."
   (exwm--log)
   (let ((obj (make-instance 'xcb:ReparentNotify)))
     (xcb:unmarshal obj data)
@@ -349,7 +352,8 @@ indicate how to support actual transparency."
         (exwm-systemtray--unembed window)))))
 
 (defun exwm-systemtray--on-ResizeRequest (data _synthetic)
-  "Resize the tray icon on ResizeRequest."
+  "Resize the tray icon on ResizeRequest.
+Argument DATA contains the raw event data."
   (exwm--log)
   (let ((obj (make-instance 'xcb:ResizeRequest))
         attr)
@@ -377,7 +381,8 @@ indicate how to support actual transparency."
         (exwm-systemtray--refresh)))))
 
 (defun exwm-systemtray--on-PropertyNotify (data _synthetic)
-  "Map/Unmap the tray icon on PropertyNotify."
+  "Map/Unmap the tray icon on PropertyNotify.
+Argument DATA contains the raw event data."
   (exwm--log)
   (let ((obj (make-instance 'xcb:PropertyNotify))
         attr info visible)
@@ -402,7 +407,8 @@ indicate how to support actual transparency."
           (exwm-systemtray--refresh))))))
 
 (defun exwm-systemtray--on-ClientMessage (data _synthetic)
-  "Handle client messages."
+  "Handle client messages.
+Argument DATA contains the raw event data."
   (let ((obj (make-instance 'xcb:ClientMessage))
         opcode data32)
     (xcb:unmarshal obj data)
@@ -421,7 +427,8 @@ indicate how to support actual transparency."
                (exwm--log "Unknown opcode message: %s" obj)))))))
 
 (defun exwm-systemtray--on-KeyPress (data _synthetic)
-  "Forward all KeyPress events to Emacs frame."
+  "Forward all KeyPress events to Emacs frame.
+Argument DATA contains the raw event data."
   (exwm--log)
   ;; This function is only executed when there's no autohide minibuffer,
   ;; a workspace frame has the input focus and the pointer is over a
@@ -450,9 +457,9 @@ indicate how to support actual transparency."
                                 (frame-parameter exwm-workspace--current
                                                  'window-id))
                        :x 0
-                       :y (- (elt (elt exwm-workspace--workareas
-                                       exwm-workspace-current-index)
-                                  3)
+                       :y (- (slot-value (exwm-workspace--workarea
+                                           exwm-workspace-current-index)
+                                         'height)
                              exwm-workspace--frame-y-offset
                              exwm-systemtray-height))))
   (exwm-systemtray--refresh-background-color)
@@ -471,9 +478,9 @@ indicate how to support actual transparency."
         (make-instance 'xcb:ConfigureWindow
                        :window exwm-systemtray--embedder-window
                        :value-mask xcb:ConfigWindow:Y
-                       :y (- (elt (elt exwm-workspace--workareas
-                                       exwm-workspace-current-index)
-                                  3)
+                       :y (- (slot-value (exwm-workspace--workarea
+                                           exwm-workspace-current-index)
+                                         'height)
                              exwm-workspace--frame-y-offset
                              exwm-systemtray-height))))
   (exwm-systemtray--refresh))
@@ -567,9 +574,9 @@ indicate how to support actual transparency."
       (exwm-workspace--update-offsets)
       (setq frame exwm-workspace--current
             ;; Bottom aligned.
-            y (- (elt (elt exwm-workspace--workareas
-                           exwm-workspace-current-index)
-                      3)
+            y (- (slot-value (exwm-workspace--workarea
+                               exwm-workspace-current-index)
+                             'height)
                  exwm-workspace--frame-y-offset
                  exwm-systemtray-height)))
     (setq parent (string-to-number (frame-parameter frame 'window-id)))
@@ -652,19 +659,20 @@ indicate how to support actual transparency."
   "Exit the systemtray module."
   (exwm--log)
   (when exwm-systemtray--connection
-    ;; Hide & reparent out the embedder before disconnection to prevent
-    ;; embedded icons from being reparented to an Emacs frame (which is the
-    ;; parent of the embedder).
-    (xcb:+request exwm-systemtray--connection
-        (make-instance 'xcb:UnmapWindow
-                       :window exwm-systemtray--embedder-window))
-    (xcb:+request exwm-systemtray--connection
-        (make-instance 'xcb:ReparentWindow
-                       :window exwm-systemtray--embedder-window
-                       :parent exwm--root
-                       :x 0
-                       :y 0))
-    (xcb:disconnect exwm-systemtray--connection)
+    (when (slot-value exwm-systemtray--connection 'connected)
+      ;; Hide & reparent out the embedder before disconnection to prevent
+      ;; embedded icons from being reparented to an Emacs frame (which is the
+      ;; parent of the embedder).
+      (xcb:+request exwm-systemtray--connection
+          (make-instance 'xcb:UnmapWindow
+                         :window exwm-systemtray--embedder-window))
+      (xcb:+request exwm-systemtray--connection
+          (make-instance 'xcb:ReparentWindow
+                         :window exwm-systemtray--embedder-window
+                         :parent exwm--root
+                         :x 0
+                         :y 0))
+      (xcb:disconnect exwm-systemtray--connection))
     (setq exwm-systemtray--connection nil
           exwm-systemtray--list nil
           exwm-systemtray--selection-owner-window nil

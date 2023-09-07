@@ -1,6 +1,6 @@
 ;;; exwm-randr.el --- RandR Module for EXWM  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2015-2021 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2023 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -51,6 +51,8 @@
 
 (require 'exwm-core)
 (require 'exwm-workspace)
+
+(declare-function x-get-atom-name "C source code" (VALUE &optional FRAME))
 
 (defgroup exwm-randr nil
   "RandR."

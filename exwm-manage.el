@@ -1,7 +1,7 @@
 ;;; exwm-manage.el --- Window Management Module for  -*- lexical-binding: t -*-
 ;;;                    EXWM
 
-;; Copyright (C) 2015-2021 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2023 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -34,8 +34,8 @@
   :group 'exwm)
 
 (defcustom exwm-manage-finish-hook nil
-  "Normal hook run after a window is just managed, in the context of the
-corresponding buffer."
+  "Normal hook run after a window is just managed.
+This hook runs in the context of the corresponding `exwm-mode' buffer."
   :type 'hook)
 
 (defcustom exwm-manage-force-tiling nil
@@ -157,7 +157,6 @@ want to match against EXWM internal variables such as `exwm-title',
 (defvar exwm-workspace--id-struts-alist)
 (defvar exwm-workspace--list)
 (defvar exwm-workspace--switch-history-outdated)
-(defvar exwm-workspace--workareas)
 (defvar exwm-workspace-current-index)
 (declare-function exwm--update-class "exwm.el" (id &optional force))
 (declare-function exwm--update-hints "exwm.el" (id &optional force))
@@ -170,17 +169,22 @@ want to match against EXWM internal variables such as `exwm-title',
 (declare-function exwm--update-window-type "exwm.el" (id &optional force))
 (declare-function exwm-floating--set-floating "exwm-floating.el" (id))
 (declare-function exwm-floating--unset-floating "exwm-floating.el" (id))
-(declare-function exwm-input-grab-keyboard "exwm-input.el")
+(declare-function exwm-input-grab-keyboard "exwm-input.el" (&optional id))
+(declare-function exwm-input-release-keyboard "exwm-input.el" (&optional id))
 (declare-function exwm-input-set-local-simulation-keys "exwm-input.el")
 (declare-function exwm-layout--fullscreen-p "exwm-layout.el" ())
 (declare-function exwm-layout--iconic-state-p "exwm-layout.el" (&optional id))
+(declare-function exwm-layout-set-fullscreen "exwm-layout.el" (&optional id))
+(declare-function exwm-workspace--get-geometry "exwm-workspace.el" (frame))
 (declare-function exwm-workspace--position "exwm-workspace.el" (frame))
 (declare-function exwm-workspace--set-fullscreen "exwm-workspace.el" (frame))
 (declare-function exwm-workspace--update-struts "exwm-workspace.el" ())
 (declare-function exwm-workspace--update-workareas "exwm-workspace.el" ())
+(declare-function exwm-workspace--workarea "exwm-workspace.el" (frame))
 
 (defun exwm-manage--update-geometry (id &optional force)
-  "Update window geometry."
+  "Update geometry of X window ID.
+Override current geometry if FORCE is non-nil."
   (exwm--log "id=#x%x" id)
   (with-current-buffer (exwm--id->buffer id)
     (unless (and exwm--geometry (not force))
@@ -196,7 +200,7 @@ want to match against EXWM internal variables such as `exwm-title',
                                  :height (/ (x-display-pixel-height) 2))))))))
 
 (defun exwm-manage--update-ewmh-state (id)
-  "Update _NET_WM_STATE."
+  "Update _NET_WM_STATE of X window ID."
   (exwm--log "id=#x%x" id)
   (with-current-buffer (exwm--id->buffer id)
     (unless exwm--ewmh-state
@@ -207,7 +211,8 @@ want to match against EXWM internal variables such as `exwm-title',
           (setq exwm--ewmh-state (append (slot-value reply 'value) nil)))))))
 
 (defun exwm-manage--update-mwm-hints (id &optional force)
-  "Update _MOTIF_WM_HINTS."
+  "Update _MOTIF_WM_HINTS of X window ID.
+Override current hinds if FORCE is non-nil."
   (exwm--log "id=#x%x" id)
   (with-current-buffer (exwm--id->buffer id)
     (unless (and (not exwm--mwm-hints-decorations) (not force))
@@ -326,12 +331,8 @@ want to match against EXWM internal variables such as `exwm-title',
         (with-slots (x y width height) exwm--geometry
           ;; Center window of type _NET_WM_WINDOW_TYPE_SPLASH
           (when (memq xcb:Atom:_NET_WM_WINDOW_TYPE_SPLASH exwm-window-type)
-            (let* ((workarea (elt exwm-workspace--workareas
-                                  (exwm-workspace--position exwm--frame)))
-                   (x* (aref workarea 0))
-                   (y* (aref workarea 1))
-                   (width* (aref workarea 2))
-                   (height* (aref workarea 3)))
+            (with-slots ((x* x) (y* y) (width* width) (height* height))
+                (exwm-workspace--workarea exwm--frame)
               (exwm--set-geometry id
                                   (+ x* (/ (- width* width) 2))
                                   (+ y* (/ (- height* height) 2))
@@ -415,7 +416,7 @@ want to match against EXWM internal variables such as `exwm-title',
   "Unmanage window ID.
 
 If WITHDRAW-ONLY is non-nil, the X window will be properly placed back to the
-root window.  Set WITHDRAW-ONLY to 'quit if this functions is used when window
+root window.  Set WITHDRAW-ONLY to `quit' if this functions is used when window
 manager is shutting down."
   (let ((buffer (exwm--id->buffer id)))
     (exwm--log "Unmanage #x%x (buffer: %s, widthdraw: %s)"
@@ -430,7 +431,9 @@ manager is shutting down."
       (exwm-workspace--update-workareas)
       (dolist (f exwm-workspace--list)
         (exwm-workspace--set-fullscreen f)))
-    (when (buffer-live-p buffer)
+    (when (and (buffer-live-p buffer)
+               ;; Invoked from `exwm-manage--exit' upon disconnection.
+               (slot-value exwm--connection 'connected))
       (with-current-buffer buffer
         ;; Unmap the X window.
         (xcb:+request exwm--connection
@@ -512,8 +515,11 @@ manager is shutting down."
 
 (defun exwm-manage--kill-buffer-query-function ()
   "Run in `kill-buffer-query-functions'."
-  (exwm--log "id=#x%x; buffer=%s" exwm--id (current-buffer))
+  (exwm--log "id=#x%x; buffer=%s" (or exwm--id 0) (current-buffer))
   (catch 'return
+    (when (or (not exwm--connection)
+              (not (slot-value exwm--connection 'connected)))
+      (throw 'return t))
     (when (or (not exwm--id)
               (xcb:+request-checked+request-check exwm--connection
                   (make-instance 'xcb:ChangeWindowAttributes
@@ -590,7 +596,8 @@ Would you like to kill it? "
         (throw 'return nil)))))
 
 (defun exwm-manage--kill-client (&optional id)
-  "Kill an X client."
+  "Kill X client ID.
+If ID is nil, kill X window corresponding to current buffer."
   (unless id (setq id (exwm--buffer->id (current-buffer))))
   (exwm--log "id=#x%x" id)
   (let* ((response (xcb:+request-unchecked+reply exwm--connection
@@ -608,14 +615,16 @@ Would you like to kill it? "
     (xcb:flush exwm--connection)))
 
 (defun exwm-manage--add-frame (frame)
-  "Run in `after-make-frame-functions'."
+  "Run in `after-make-frame-functions'.
+FRAME is the newly created frame."
   (exwm--log "frame=%s" frame)
   (when (display-graphic-p frame)
     (push (string-to-number (frame-parameter frame 'outer-window-id))
           exwm-manage--frame-outer-id-list)))
 
 (defun exwm-manage--remove-frame (frame)
-  "Run in `delete-frame-functions'."
+  "Run in `delete-frame-functions'.
+FRAME is the frame to be deleted."
   (exwm--log "frame=%s" frame)
   (when (display-graphic-p frame)
     (setq exwm-manage--frame-outer-id-list
@@ -623,7 +632,8 @@ Would you like to kill it? "
                 exwm-manage--frame-outer-id-list))))
 
 (defun exwm-manage--on-ConfigureRequest (data _synthetic)
-  "Handle ConfigureRequest event."
+  "Handle ConfigureRequest event.
+DATA contains unmarshalled ConfigureRequest event data."
   (exwm--log)
   (let ((obj (make-instance 'xcb:ConfigureRequest))
         buffer edges width-delta height-delta)
@@ -713,7 +723,8 @@ border-width: %d; sibling: #x%x; stack-mode: %d"
   (xcb:flush exwm--connection))
 
 (defun exwm-manage--on-MapRequest (data _synthetic)
-  "Handle MapRequest event."
+  "Handle MapRequest event.
+DATA contains unmarshalled MapRequest event data."
   (let ((obj (make-instance 'xcb:MapRequest)))
     (xcb:unmarshal obj data)
     (with-slots (parent window) obj
@@ -733,7 +744,8 @@ border-width: %d; sibling: #x%x; stack-mode: %d"
           (exwm-manage--manage-window window))))))
 
 (defun exwm-manage--on-UnmapNotify (data _synthetic)
-  "Handle UnmapNotify event."
+  "Handle UnmapNotify event.
+DATA contains unmarshalled UnmapNotify event data."
   (let ((obj (make-instance 'xcb:UnmapNotify)))
     (xcb:unmarshal obj data)
     (with-slots (window) obj
@@ -741,7 +753,8 @@ border-width: %d; sibling: #x%x; stack-mode: %d"
       (exwm-manage--unmanage-window window t))))
 
 (defun exwm-manage--on-MapNotify (data _synthetic)
-  "Handle MapNotify event."
+  "Handle MapNotify event.
+DATA contains unmarshalled MapNotify event data."
   (let ((obj (make-instance 'xcb:MapNotify)))
     (xcb:unmarshal obj data)
     (with-slots (window) obj
@@ -766,7 +779,9 @@ border-width: %d; sibling: #x%x; stack-mode: %d"
         (xcb:flush exwm--connection)))))
 
 (defun exwm-manage--on-DestroyNotify (data synthetic)
-  "Handle DestroyNotify event."
+  "Handle DestroyNotify event.
+DATA contains unmarshalled DestroyNotify event data.
+SYNTHETIC indicates whether the event is a synthetic event."
   (unless synthetic
     (exwm--log)
     (let ((obj (make-instance 'xcb:DestroyNotify)))
