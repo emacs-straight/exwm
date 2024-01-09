@@ -1,6 +1,6 @@
 ;;; exwm-input.el --- Input Module for EXWM  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2015-2023 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2024 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 
@@ -101,6 +101,14 @@ defined in `exwm-mode-map' here."
 ;;        laggy experience.
 (defconst exwm-input--update-focus-interval 0.01
   "Time interval (in seconds) for accumulating input focus update requests.")
+
+(defconst exwm-input--passthrough-functions '(read-char
+                                              read-char-exclusive
+                                              read-key-sequence-vector
+                                              read-key-sequence
+                                              read-event)
+  "Low-level functions that read events and need to be exempted from
+EXWM's input handling.")
 
 (defvar exwm-input--during-command nil
   "Indicate whether between `pre-command-hook' and `post-command-hook'.")
@@ -1158,6 +1166,11 @@ One use is to access the keymap bound to KEYS (as prefix keys) in `char-mode'."
     (exwm--log)
     (exwm-input--on-minibuffer-exit)))
 
+(defun exwm-input--call-with-passthrough (function &rest args)
+  "Bind `exwm-input-line-mode-passthrough' and call FUNCTION with ARGS."
+  (let ((exwm-input-line-mode-passthrough t))
+    (apply function args)))
+
 (defun exwm-input--init ()
   "Initialize the keyboard module."
   (exwm--log)
@@ -1213,7 +1226,10 @@ One use is to access the keymap bound to KEYS (as prefix keys) in `char-mode'."
         (run-with-idle-timer 0 t #'exwm-input--on-echo-area-dirty))
   (add-hook 'echo-area-clear-hook #'exwm-input--on-echo-area-clear)
   ;; Update focus when buffer list updates
-  (add-hook 'buffer-list-update-hook #'exwm-input--on-buffer-list-update))
+  (add-hook 'buffer-list-update-hook #'exwm-input--on-buffer-list-update)
+
+  (dolist (fun exwm-input--passthrough-functions)
+    (advice-add fun :around #'exwm-input--call-with-passthrough)))
 
 (defun exwm-input--post-init ()
   "The second stage in the initialization of the input module."
@@ -1223,6 +1239,8 @@ One use is to access the keymap bound to KEYS (as prefix keys) in `char-mode'."
 (defun exwm-input--exit ()
   "Exit the input module."
   (exwm--log)
+  (dolist (fun exwm-input--passthrough-functions)
+    (advice-remove fun #'exwm-input--call-with-passthrough))
   (exwm-input--unset-simulation-keys)
   (remove-hook 'pre-command-hook #'exwm-input--on-pre-command)
   (remove-hook 'post-command-hook #'exwm-input--on-post-command)
