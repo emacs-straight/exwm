@@ -107,8 +107,7 @@ defined in `exwm-mode-map' here."
                                               read-key-sequence-vector
                                               read-key-sequence
                                               read-event)
-  "Low-level functions that read events and need to be exempted from
-EXWM's input handling.")
+  "Low-level read functions that must be exempted from EXWM input handling.")
 
 (defvar exwm-input--during-command nil
   "Indicate whether between `pre-command-hook' and `post-command-hook'.")
@@ -762,7 +761,7 @@ Current buffer must be an `exwm-mode' buffer."
 (defun exwm-input--on-ButtonPress-line-mode (buffer button-event)
   "Handle button events in line mode.
 BUFFER is the `exwm-mode' buffer the event was generated
-on. BUTTON-EVENT is the X event converted into an Emacs event.
+on.  BUTTON-EVENT is the X event converted into an Emacs event.
 
 The return value is used as event_mode to release the original
 button event."
@@ -984,11 +983,6 @@ multiple keys.  If END-KEY is non-nil, stop sending keys if it's pressed."
                  (define-key exwm-mode-map key
                    #'exwm-input-send-simulation-key))))
            exwm-input--simulation-keys))
-
-(defun exwm-input-set-simulation-keys (simulation-keys)
-  "Please customize or set `exwm-input-simulation-keys' instead."
-  (declare (obsolete nil "26"))
-  (exwm-input--set-simulation-keys simulation-keys))
 
 (defcustom exwm-input-simulation-keys nil
   "Simulation keys.

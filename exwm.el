@@ -3,11 +3,11 @@
 ;; Copyright (C) 2015-2024 Free Software Foundation, Inc.
 
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
-;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>
+;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>, Steven Allen <steven@stebalien.com>, Daniel Mendler <mail@daniel-mendler.de>
 ;; Version: 0.28
 ;; Package-Requires: ((emacs "26.1") (xelb "0.18"))
 ;; Keywords: unix
-;; URL: https://github.com/ch11ng/exwm
+;; URL: https://github.com/emacs-exwm/exwm
 
 ;; This file is part of GNU Emacs.
 
@@ -29,7 +29,7 @@
 ;; Overview
 ;; --------
 ;; EXWM (Emacs X Window Manager) is a full-featured tiling X window manager
-;; for Emacs built on top of [XELB](https://github.com/ch11ng/xelb).
+;; for Emacs built on top of [XELB](https://github.com/emacs-exwm/xelb).
 ;; It features:
 ;; + Fully keyboard-driven operations
 ;; + Hybrid layout modes (tiling & stacking)
@@ -37,6 +37,8 @@
 ;; + ICCCM/EWMH compliance
 ;; + (Optional) RandR (multi-monitor) support
 ;; + (Optional) Built-in system tray
+;; + (Optional) Builtin input method
+;; + (Optional) Background setting support
 
 ;; Installation & configuration
 ;; ----------------------------
@@ -54,7 +56,7 @@
 ;;    xinit -- vt01
 ;;
 ;; You should additionally hide the menu-bar, tool-bar, etc to increase the
-;; usable space.  Please check the wiki (https://github.com/ch11ng/exwm/wiki)
+;; usable space.  Please check the wiki (https://github.com/emacs-exwm/exwm/wiki)
 ;; for more detailed instructions on installation, configuration, usage, etc.
 
 ;; References:
@@ -98,8 +100,9 @@
   :type 'hook)
 
 (defcustom exwm-blocking-subrs
-  (list #'x-file-dialog #'x-popup-dialog #'x-select-font
-        #'message-box #'message-or-box)
+  ;; `x-file-dialog' and `x-select-font' are missing on some Emacs builds, for
+  ;; example on the X11 Lucid build.
+  '(x-file-dialog x-popup-dialog x-select-font message-box message-or-box)
   "Subrs (primitives) that would normally block EXWM."
   :type '(repeat function))
 
@@ -113,8 +116,8 @@
   "Name of the subordinate Emacs server.")
 
 (defvar exwm--server-timeout 1
-  "Number of seconds to wait for the subordinate Emacs server to exit before
-killing it.")
+  "Number of seconds to wait for the subordinate Emacs server to exit.
+After this time, the server will be killed.")
 
 (defvar exwm--server-process nil "Process of the subordinate Emacs server.")
 
