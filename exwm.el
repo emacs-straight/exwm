@@ -5,7 +5,7 @@
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 ;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>, Steven Allen <steven@stebalien.com>, Daniel Mendler <mail@daniel-mendler.de>
 ;; Version: 0.28
-;; Package-Requires: ((emacs "26.1") (xelb "0.18"))
+;; Package-Requires: ((emacs "27.1") (xelb "0.18"))
 ;; Keywords: unix
 ;; URL: https://github.com/emacs-exwm/exwm
 
@@ -35,10 +35,12 @@
 ;; + Hybrid layout modes (tiling & stacking)
 ;; + Dynamic workspace support
 ;; + ICCCM/EWMH compliance
-;; + (Optional) RandR (multi-monitor) support
-;; + (Optional) Built-in system tray
-;; + (Optional) Builtin input method
-;; + (Optional) Background setting support
+;; Optional features:
+;; + RandR (multi-monitor) support
+;; + System tray
+;; + Input method
+;; + Background setting support
+;; + XSETTINGS server
 
 ;; Installation & configuration
 ;; ----------------------------
@@ -79,7 +81,6 @@
 (defgroup exwm nil
   "Emacs X Window Manager."
   :tag "EXWM"
-  :version "25.3"
   :group 'applications
   :prefix "exwm-")
 
