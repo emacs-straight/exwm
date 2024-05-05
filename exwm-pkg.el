@@ -1,0 +1,2 @@
+;; Generated package description from exwm.el  -*- no-byte-compile: t -*-
+(define-package "exwm" "0.28.0.20240403.140839" "Emacs X Window Manager" '((emacs "27.1") (xelb "0.18")) :commit "236f3ca467ba9d3aa666cb77ece61c6db03b99ce" :authors '(("Chris Feng" . "chris.w.feng@gmail.com")) :maintainer '(("Adrián Medraño Calvo" . "adrian@medranocalvo.com") ("Steven Allen" . "steven@stebalien.com") ("Daniel Mendler" . "mail@daniel-mendler.de")) :keywords '("unix") :url "https://github.com/emacs-exwm/exwm")
