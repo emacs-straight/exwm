@@ -23,9 +23,9 @@
 
 ;; This module adds X background color setting support to EXWM.
 
-;; To use this module, load and enable it as follows:
-;;   (require 'exwm-background)
-;;   (exwm-background-enable)
+;; To use this module, enable it as follows:
+;;
+;;   (exwm-background-mode 1)
 ;;
 ;; By default, this will apply the theme's background color.  However, that
 ;; color can be customized via the `exwm-background-color' setting.
@@ -34,16 +34,31 @@
 
 (require 'exwm-core)
 
+(defgroup exwm-background nil
+  "Background support."
+  :group 'exwm)
+
+;;;###autoload
+(define-minor-mode exwm-background-mode
+  "Toggle EXWM background support."
+  :global t
+  :group 'exwm-background
+  (exwm--global-minor-mode-body background))
+
+(defun exwm-background-enable ()
+  "Enable EXWM background support."
+  (exwm-background-mode 1))
+(make-obsolete 'exwm-background-enable "Use `exwm-background-mode' instead." "0.30")
+
 (defcustom exwm-background-color nil
   "Background color for Xorg."
   :type '(choice
           (color :tag "Background Color")
           (const :tag "Default" nil))
-  :group 'exwm
   :initialize #'custom-initialize-default
   :set (lambda (symbol value)
          (set-default-toplevel-value symbol value)
-         (exwm-background--update)))
+         (when exwm-background-mode (exwm-background--update))))
 
 (defconst exwm-background--properties '("_XROOTPMAP_ID" "_XSETROOT_ID" "ESETROOT_PMAP_ID")
   "The background properties to set.
@@ -187,12 +202,6 @@ may kill this connection when they replace it.")
   (setq exwm-background--pixmap nil
         exwm-background--connection nil
         exwm-background--atoms nil))
-
-(defun exwm-background-enable ()
-  "Enable background support for EXWM."
-  (exwm--log)
-  (add-hook 'exwm-init-hook #'exwm-background--init)
-  (add-hook 'exwm-exit-hook #'exwm-background--exit))
 
 (provide 'exwm-background)
 

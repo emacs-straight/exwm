@@ -26,7 +26,6 @@
 ;;
 ;; This package can be configured as follows:
 ;;
-;;   (require 'exwm-xsettings)
 ;;   (setq exwm-xsettings-theme '("Adwaita" . "Adwaita-dark") ;; light/dark
 ;;         exwm-xsettings `(("Xft/HintStyle" . "hintslight")
 ;;                          ("Xft/RGBA" . "rgb")
@@ -37,7 +36,7 @@
 ;;                          ;; (144 = 1.5 * 96).
 ;;                          ("Xft/DPI" . ,(* 144 1024))
 ;;                          ("Xft/Hinting" . 1)))
-;;   (exwm-xsettings-enable)
+;;   (exwm-xsettings-mode 1)
 ;;
 ;; To modify these settings at runtime, customize them with
 ;; `custom-set-variables' or `setopt' (Emacs 29+).  E.g., the following will
@@ -52,11 +51,27 @@
 (require 'xcb-xsettings)
 (require 'exwm-core)
 
+(defgroup exwm-xsettings nil
+  "XSETTINGS."
+  :group 'exwm)
+
 (defvar exwm-xsettings--connection nil)
 (defvar exwm-xsettings--XSETTINGS_SETTINGS-atom nil)
 (defvar exwm-xsettings--XSETTINGS_S0-atom nil)
 (defvar exwm-xsettings--selection-owner-window nil)
 (defvar exwm-xsettings--serial 0)
+
+;;;###autoload
+(define-minor-mode exwm-xsettings-mode
+  "Toggle EXWM xsettings support."
+  :global t
+  :group 'exwm-xsettings
+  (exwm--global-minor-mode-body xsettings))
+
+(defun exwm-xsettings-enable ()
+  "Enable EXWM xsettings support."
+  (exwm-xsettings-mode 1))
+(make-obsolete 'exwm-xsettings-enable "Use `exwm-xsettings-mode' instead." "0.30")
 
 (defun exwm-xsettings--rgba-match (_widget value)
   "Return t if VALUE is a valid RGBA color."
@@ -67,11 +82,7 @@
 
 SYMBOL is the setting being updated and VALUE is the new value."
   (set-default-toplevel-value symbol value)
-  (exwm-xsettings--update-settings))
-
-(defgroup exwm-xsettings nil
-  "XSETTINGS."
-  :group 'exwm)
+  (when exwm-xsettings-mode (exwm-xsettings--update-settings)))
 
 (defcustom exwm-xsettings nil
   "Alist of custom XSETTINGS.
@@ -324,12 +335,6 @@ SERIAL is a sequence number."
           exwm-xsettings--XSETTINGS_SETTINGS-atom nil
           exwm-xsettings--XSETTINGS_S0-atom nil
           exwm-xsettings--selection-owner-window nil)))
-
-(defun exwm-xsettings-enable ()
-  "Enable xsettings support for EXWM."
-  (exwm--log)
-  (add-hook 'exwm-init-hook #'exwm-xsettings--init)
-  (add-hook 'exwm-exit-hook #'exwm-xsettings--exit))
 
 (provide 'exwm-xsettings)
 

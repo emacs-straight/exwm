@@ -41,10 +41,9 @@
 ;; + Only support static event flow, on-demand-synchronous method.
 ;; + Only "root-window" input style is supported.
 
-;; To use this module, first load and enable it as follows:
+;; To use this module, enable it as follows:
 ;;
-;;    (require 'exwm-xim)
-;;    (exwm-xim-enable)
+;;    (exwm-xim-mode 1)
 ;;
 ;; A keybinding for `toggle-input-method' is probably required to turn on &
 ;; off an input method (default to `default-input-method').  It's bound to
@@ -797,11 +796,17 @@ Such event would be received when the client window is destroyed."
   (xcb:disconnect exwm-xim--conn)
   (setq exwm-xim--conn nil))
 
+;;;###autoload
+(define-minor-mode exwm-xim-mode
+  "Toggle EXWM XIM support."
+  :global t
+  :group 'exwm
+  (exwm--global-minor-mode-body xim))
+
 (defun exwm-xim-enable ()
-  "Enable XIM support for EXWM."
-  (exwm--log)
-  (add-hook 'exwm-init-hook #'exwm-xim--init)
-  (add-hook 'exwm-exit-hook #'exwm-xim--exit))
+  "Enable EXWM XIM support."
+  (exwm-xim-mode 1))
+(make-obsolete 'exwm-xim-enable "Use `exwm-xim-mode' instead." "0.30")
 
 
 
