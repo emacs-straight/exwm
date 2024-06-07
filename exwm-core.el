@@ -38,12 +38,12 @@
   :group 'exwm)
 
 (defcustom exwm-debug-log-time-function #'exwm-debug-log-uptime
-  "Function used for generating timestamps in `exwm-debug' logs.
+  "Function used for generating timestamps in debug log.
 
 Here are some predefined candidates:
 `exwm-debug-log-uptime': Display the uptime of this Emacs instance.
 `exwm-debug-log-time': Display time of day.
-`nil': Disable timestamp."
+nil: Disable timestamp."
   :type `(choice (const :tag "Emacs uptime" ,#'exwm-debug-log-uptime)
                  (const :tag "Time of day" ,#'exwm-debug-log-time)
                  (const :tag "Off" nil)
@@ -98,13 +98,15 @@ Here are some predefined candidates:
 (declare-function exwm-workspace-switch "exwm-workspace.el"
                   (frame-or-index &optional force))
 
-(define-minor-mode exwm-debug
+(defvaralias 'exwm-debug 'exwm-debug-mode) ;; Not obsolete
+(define-minor-mode exwm-debug-mode
   "Debug-logging enabled if non-nil."
   :global t
   :group 'exwm-debug)
+(define-obsolete-function-alias 'exwm-debug #'exwm-debug-mode "0.30")
 
 (defmacro exwm--debug (&rest forms)
-  "Evaluate FORMS if mode `exwm-debug' is active."
+  "Evaluate FORMS if `exwm-debug-mode' is active."
   (when exwm-debug `(progn ,@forms)))
 
 (defmacro exwm--log (&optional format-string &rest objects)
@@ -285,7 +287,7 @@ One of `line-mode' or `char-mode'.")
   (let ((map (make-sparse-keymap)))
     (define-key map "\C-c\C-d\C-l" #'xcb-debug:clear)
     (define-key map "\C-c\C-d\C-m" #'xcb-debug:mark)
-    (define-key map "\C-c\C-d\C-t" #'exwm-debug)
+    (define-key map "\C-c\C-d\C-t" #'exwm-debug-mode)
     (define-key map "\C-c\C-f" #'exwm-layout-set-fullscreen)
     (define-key map "\C-c\C-h" #'exwm-floating-hide)
     (define-key map "\C-c\C-k" #'exwm-input-release-keyboard)
@@ -409,9 +411,10 @@ One of `line-mode' or `char-mode'.")
         vertical-scroll-bar nil))
 
 (defmacro exwm--global-minor-mode-body (name &optional init exit)
-  "Define EXWM namespaced global minor mode with NAME.
-EXWM's init-hook and exit-hook are modified to call INIT and EXIT functions.
-If an X connection exists, the mode is immediately enabled or disabled."
+  "Global minor mode body for mode with NAME.
+The INIT and EXIT functions are added to `exwm-init-hook' and
+`exwm-exit-hook' respectively.  If an X connection exists, the mode is
+immediately enabled or disabled."
   (declare (indent 1) (debug t))
   (let* ((mode (intern (format "exwm-%s-mode" name)))
          (init (or init (intern (format "exwm-%s--init" name))))
