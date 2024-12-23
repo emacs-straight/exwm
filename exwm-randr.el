@@ -106,12 +106,6 @@ corresponding monitors whenever the monitors are active.
   :group 'exwm-randr
   (exwm--global-minor-mode-body randr))
 
-(defun exwm-randr-enable ()
-  "Enable EXWM RandR support."
-  (message "`exwm-randr-enable' is obsolete. Use `exwm-randr-mode' instead.")
-  (exwm-randr-mode 1))
-(make-obsolete 'exwm-randr-enable "Use `exwm-randr-mode' instead." "0.30")
-
 (defsubst exwm-randr--assert-connected ()
   "Assert that `exwm-randr-mode' is enabled and activated."
   (cond
@@ -307,9 +301,9 @@ Refresh when any CRTC/output changes."
     (xcb:unmarshal evt data)
     (with-slots (subCode u) evt
       (cond ((= subCode xcb:randr:Notify:CrtcChange)
-	     (setq notify (slot-value u 'cc)))
-	    ((= subCode xcb:randr:Notify:OutputChange)
-	     (setq notify (slot-value u 'oc))))
+             (setq notify (slot-value u 'cc)))
+            ((= subCode xcb:randr:Notify:OutputChange)
+             (setq notify (slot-value u 'oc))))
       (when notify
         (with-slots (timestamp) notify
           (when (> timestamp exwm-randr--last-timestamp)
@@ -387,8 +381,5 @@ Refresh when any RandR 1.5 monitor changes."
     (xcb:disconnect exwm-randr--connection)
     (setq exwm-randr--connection nil)))
 
-
-
 (provide 'exwm-randr)
-
 ;;; exwm-randr.el ends here
