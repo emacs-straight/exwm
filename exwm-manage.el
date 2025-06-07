@@ -27,6 +27,7 @@
 ;;; Code:
 
 (require 'exwm-core)
+(eval-when-compile (require 'subr-x)) ;; Needed on 28 for when-let*
 
 (defgroup exwm-manage nil
   "Manage."
@@ -249,7 +250,6 @@ This only works when procfs is mounted, which may not be the case on some BSDs."
               ((file-accessible-directory-p cwd)))
         (setq default-directory (file-name-as-directory cwd))
       (setq default-directory (expand-file-name "~/")))))
-
 
 (defun exwm-manage--set-client-list ()
   "Set _NET_CLIENT_LIST."
