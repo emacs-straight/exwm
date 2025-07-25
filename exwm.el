@@ -22,7 +22,7 @@
 ;; GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public License
-;; along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -65,7 +65,7 @@
 ;; for more detailed instructions on installation, configuration, usage, etc.
 
 ;; References:
-;; + dwm (http://dwm.suckless.org/)
+;; + dwm (https://dwm.suckless.org/)
 ;; + i3 wm (https://i3wm.org/)
 ;; + Also see references within each required library.
 

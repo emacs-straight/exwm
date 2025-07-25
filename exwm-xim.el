@@ -17,7 +17,7 @@
 ;; GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public License
-;; along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -61,8 +61,8 @@
 ;;    export CLUTTER_IM_MODULE=xim
 
 ;; References:
-;; + XIM (http://www.x.org/releases/X11R7.6/doc/libX11/specs/XIM/xim.html)
-;; + IMdkit (http://xorg.freedesktop.org/archive/unsupported/lib/IMdkit/)
+;; + XIM (https://www.x.org/releases/X11R7.6/doc/libX11/specs/XIM/xim.html)
+;; + IMdkit (https://xorg.freedesktop.org/archive/unsupported/lib/IMdkit/)
 ;; + UIM (https://github.com/uim/uim)
 
 ;;; Code:
