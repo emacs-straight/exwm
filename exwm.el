@@ -5,7 +5,7 @@
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 ;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>, Steven Allen <steven@stebalien.com>, Daniel Mendler <mail@daniel-mendler.de>
 ;; Version: 0.34
-;; Package-Requires: ((emacs "27.1") (xelb "0.20") (compat "30"))
+;; Package-Requires: ((emacs "27.1") (xelb "0.21") (compat "30"))
 ;; Keywords: unix
 ;; URL: https://github.com/emacs-exwm/exwm
 
@@ -144,7 +144,9 @@ Set during `exwm--init'.")
 
 (defun exwm-restart ()
   "Restart EXWM."
+  (declare (obsolete restart-emacs "0.34"))
   (interactive)
+  (message "Use `restart-emacs' instead of the obsolete `exwm-restart'.")
   (exwm--log)
   (when (exwm--confirm-kill-emacs "Restart" 'no-check)
     (let* ((attr (process-attributes (emacs-pid)))
