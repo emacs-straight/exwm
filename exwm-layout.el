@@ -51,7 +51,6 @@
 (defvar exwm-layout--timer nil "Timer used to track echo area changes.")
 
 (defvar exwm-workspace--current)
-(defvar exwm-workspace--frame-y-offset)
 (declare-function exwm-input--release-keyboard "exwm-input.el")
 (declare-function exwm-input--grab-keyboard "exwm-input.el")
 (declare-function exwm-input-grab-keyboard "exwm-input.el")
@@ -115,23 +114,18 @@ See variable `exwm-layout-auto-iconify'."
          (x (pop edges))
          (y (pop edges))
          (width (- (pop edges) x))
-         (height (- (pop edges) y))
-         frame-x frame-y frame-width frame-height)
+         (height (- (pop edges) y)))
     (with-current-buffer (exwm--id->buffer id)
-      (when exwm--floating-frame
-        (setq frame-width (frame-pixel-width exwm--floating-frame)
-              frame-height (+ (frame-pixel-height exwm--floating-frame)
-                              ;; Use `frame-outer-height' in the future.
-                              exwm-workspace--frame-y-offset))
-        (when exwm--floating-frame-position
-          (setq frame-x (elt exwm--floating-frame-position 0)
-                frame-y (elt exwm--floating-frame-position 1)
+      (when (and exwm--floating-frame exwm--floating-frame-geometry)
+        (with-slots ((frame-x x) (frame-y y)
+                     (frame-width width) (frame-height height))
+            exwm--floating-frame-geometry
+          (setq exwm--floating-frame-geometry nil
                 x (+ x frame-x (- exwm-layout--floating-hidden-position))
                 y (+ y frame-y (- exwm-layout--floating-hidden-position)))
-          (setq exwm--floating-frame-position nil))
-        (exwm--set-geometry (frame-parameter exwm--floating-frame
-                                             'exwm-container)
-                            frame-x frame-y frame-width frame-height))
+          (exwm--set-geometry (frame-parameter exwm--floating-frame
+                                               'exwm-container)
+                              frame-x frame-y frame-width frame-height)))
       (when (exwm-layout--fullscreen-p)
         (with-slots ((x* x)
                      (y* y)
@@ -165,8 +159,7 @@ See variable `exwm-layout-auto-iconify'."
                (geometry (xcb:+request-unchecked+reply exwm--connection
                              (make-instance 'xcb:GetGeometry
                                             :drawable container))))
-          (setq exwm--floating-frame-position
-                (vector (slot-value geometry 'x) (slot-value geometry 'y)))
+          (setq exwm--floating-frame-geometry geometry)
           (exwm--set-geometry container exwm-layout--floating-hidden-position
                               exwm-layout--floating-hidden-position
                               1
@@ -454,7 +447,7 @@ windows."
    ;; Resize on floating layout
    (exwm--fixed-size)                   ;fixed size
    (horizontal
-    (let* ((width (frame-pixel-width))
+    (let* ((width (frame-outer-width))
            (edges (exwm--window-inside-pixel-edges))
            (inner-width (- (elt edges 2) (elt edges 0)))
            (margin (- width inner-width)))
@@ -487,7 +480,7 @@ windows."
                            :width width))
         (xcb:flush exwm--connection))))
    (t
-    (let* ((height (+ (frame-pixel-height) exwm-workspace--frame-y-offset))
+    (let* ((height (frame-outer-height))
            (edges (exwm--window-inside-pixel-edges))
            (inner-height (- (elt edges 3) (elt edges 1)))
            (margin (- height inner-height)))
@@ -544,39 +537,43 @@ See also `exwm-layout-enlarge-window'."
   (exwm--log "%s" delta)
   (exwm-layout-enlarge-window (- delta) t))
 
+(defun exwm-layout--window-bottom-offset (window)
+  "Compute the distance from the bottom of WINDOW to the bottom of its frame."
+  (- (elt (frame-edges (window-frame window) 'outer-edges) 3)
+     (elt (exwm--window-inside-pixel-edges ) 3)))
+
 (defun exwm-layout-hide-mode-line ()
   "Hide mode-line."
   (interactive)
   (exwm--log)
   (when (and (derived-mode-p 'exwm-mode) mode-line-format)
-    (let (mode-line-height)
-      (when exwm--floating-frame
-        (setq mode-line-height (window-mode-line-height
-                                (frame-root-window exwm--floating-frame))))
+    (if exwm--floating-frame
+        (let* ((window (frame-first-window exwm--floating-frame))
+               (old-bottom-offset (exwm-layout--window-bottom-offset window)))
+          (setq exwm--mode-line-format mode-line-format
+                mode-line-format nil)
+          (exwm-layout-enlarge-window
+           (- (exwm-layout--window-bottom-offset window) old-bottom-offset)))
       (setq exwm--mode-line-format mode-line-format
             mode-line-format nil)
-      (if (not exwm--floating-frame)
-          (exwm-layout--show exwm--id)
-        (set-frame-height exwm--floating-frame
-                          (- (frame-pixel-height exwm--floating-frame)
-                             mode-line-height)
-                          nil t)))))
+      (exwm-layout--show exwm--id))))
 
 (defun exwm-layout-show-mode-line ()
   "Show mode-line."
   (interactive)
   (exwm--log)
   (when (and (derived-mode-p 'exwm-mode) (not mode-line-format))
-    (setq mode-line-format exwm--mode-line-format
-          exwm--mode-line-format nil)
-    (if (not exwm--floating-frame)
-        (exwm-layout--show exwm--id)
-      (set-frame-height exwm--floating-frame
-                        (+ (frame-pixel-height exwm--floating-frame)
-                           (window-mode-line-height (frame-root-window
-                                                     exwm--floating-frame)))
-                        nil t)
-      (call-interactively #'exwm-input-grab-keyboard))
+    (if exwm--floating-frame
+        (let* ((window (frame-first-window exwm--floating-frame))
+               (old-bottom-offset (exwm-layout--window-bottom-offset window)))
+          (setq mode-line-format exwm--mode-line-format
+                exwm--mode-line-format nil)
+          (exwm-layout-enlarge-window
+           (- (exwm-layout--window-bottom-offset window) old-bottom-offset))
+          (call-interactively #'exwm-input-grab-keyboard))
+      (setq mode-line-format exwm--mode-line-format
+            exwm--mode-line-format nil)
+      (exwm-layout--show exwm--id))
     (force-mode-line-update)))
 
 (defun exwm-layout-toggle-mode-line ()
