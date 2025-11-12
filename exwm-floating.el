@@ -235,24 +235,23 @@ configured dimension is invalid."
         (when (= 0 width) (setq width (/ screen-width 2)))
         (when (= 0 height) (setq height (/ screen-height 2)))
 
-        ;; Center floating windows on the current screen/window if they have no explicit position,
-        ;; or move adjust their position relative to the current screen if they do.
-        (if (and (= x 0) (= y 0))
-            (if-let* ((parent-buffer (exwm--id->buffer exwm-transient-for))
-                      (parent-window (get-buffer-window parent-buffer))
-                      (parent-edges (exwm--window-inside-absolute-pixel-edges parent-window))
-                      (parent-width (- (elt parent-edges 2) (elt parent-edges 0)))
-                      (parent-height (- (elt parent-edges 3) (elt parent-edges 1)))
-                      ((and (<= width parent-width) (<= height parent-height))))
-                ;; Put at the center of leading window
-                (setq x (+ screen-x (/ (- parent-width  width) 2))
-                      y (+ screen-y (/ (- parent-height height) 2)))
-              ;; Put at the center of screen
-              (setq x (/ (- screen-width width) 2)
-                    y (/ (- screen-height height) 2)))
-          ;; Adjust the requested position with respect to the current screen.
-          (setq x (+ x screen-x)
-                y (+ y screen-y)))
+        ;; Center floating windows unless they have explicit positions.
+        (when (and (or (= x 0) (= x screen-x))
+                   (or (= y 0) (= y screen-y)))
+          (if-let* ((parent-buffer (exwm--id->buffer exwm-transient-for))
+                    (parent-window (get-buffer-window parent-buffer))
+                    (parent-edges (exwm--window-inside-absolute-pixel-edges parent-window))
+                    (parent-x (elt parent-edges 0))
+                    (parent-y (elt parent-edges 1))
+                    (parent-width (- (elt parent-edges 2) parent-x))
+                    (parent-height (- (elt parent-edges 3) parent-y))
+                    ((and (<= width parent-width) (<= height parent-height))))
+              ;; Put at the center of leading window
+              (setq x (+ parent-x (/ (- parent-width  width) 2))
+                    y (+ parent-y (/ (- parent-height height) 2)))
+            ;; Put at the center of screen
+            (setq x (+ screen-x (/ (- screen-width width) 2))
+                  y (+ screen-y (/ (- screen-height height) 2)))))
 
         ;; Translate the window size hints into the correct container size.
         ;; But avoid moving the window border off-screen in the process.
@@ -277,14 +276,14 @@ configured dimension is invalid."
          ((> width screen-width)
           (setq x screen-x width screen-width))
          ;; Make sure at least half of the window is visible
-         ((> screen-x (+ x (/ width 2)) (+ screen-x screen-width))
+         ((not (< screen-x (+ x (/ width 2)) (+ screen-x screen-width)))
           (setq x (+ screen-x (/ (- screen-width width) 2)))))
         (cond
          ;; Too tall
          ((> height screen-height)
           (setq y screen-y height screen-height))
          ;; Make sure at least half of the window is visible
-         ((> screen-y (+ y (/ height 2)) (+ screen-y screen-height))
+         ((not (< screen-y (+ y (/ height 2)) (+ screen-y screen-height)))
           (setq y (+ screen-y (/ (- screen-height height) 2)))))
 
         ;; Apply user configuration.
