@@ -5,7 +5,7 @@
 ;; Author: Chris Feng <chris.w.feng@gmail.com>
 ;; Maintainer: Adrián Medraño Calvo <adrian@medranocalvo.com>, Steven Allen <steven@stebalien.com>, Daniel Mendler <mail@daniel-mendler.de>
 ;; Version: 0.34
-;; Package-Requires: ((emacs "27.1") (xelb "0.22") (compat "31"))
+;; Package-Requires: ((emacs "29.1") (xelb "0.22") (compat "31"))
 ;; Keywords: unix
 ;; URL: https://github.com/emacs-exwm/exwm
 
@@ -78,7 +78,6 @@
 (require 'exwm-floating)
 (require 'exwm-manage)
 (require 'exwm-input)
-(eval-when-compile (require 'subr-x)) ;; Needed on 28 for when-let*
 
 (declare-function x-get-atom-name "C source code" (VALUE &optional FRAME))
 
@@ -145,37 +144,6 @@ Set during `exwm--init'.")
       ;; Force refresh
       (exwm-layout--refresh)
       (call-interactively #'exwm-input-grab-keyboard))))
-
-(defun exwm-restart ()
-  "Restart EXWM."
-  (declare (obsolete restart-emacs "0.34"))
-  (interactive)
-  (message "Use `restart-emacs' instead of the obsolete `exwm-restart'.")
-  (exwm--log)
-  (when (exwm--confirm-kill-emacs "Restart" 'no-check)
-    (let* ((attr (process-attributes (emacs-pid)))
-           (args (cdr (assq 'args attr)))
-           (ppid (cdr (assq 'ppid attr)))
-           (pargs (cdr (assq 'args (process-attributes ppid)))))
-      (cond
-       ((= ppid 1)
-        ;; The parent is the init process.  This probably means this
-        ;; instance is an emacsclient.  Anyway, start a control instance
-        ;; to manage the subsequent ones.
-        (call-process (car command-line-args))
-        (kill-emacs))
-       ((string= args pargs)
-        ;; This is a subordinate instance.  Return a magic number to
-        ;; inform the parent (control instance) to start another one.
-        (kill-emacs ?R))
-       (t
-        ;; This is the control instance.  Keep starting subordinate
-        ;; instances until told to exit.
-        ;; Run `server-force-stop' if it exists.
-        (run-hooks 'kill-emacs-hook)
-        (with-temp-buffer
-          (while (= ?R (shell-command-on-region (point) (point) args))))
-        (kill-emacs))))))
 
 (defun exwm--update-desktop (xwin)
   "Update _NET_WM_DESKTOP.
@@ -1182,20 +1150,6 @@ FRAME, if given, indicates the X display EXWM should manage."
   (dolist (i exwm-blocking-subrs)
     (advice-add i :around #'exwm--server-eval-at)))
 
-;;;###autoload
-(defun exwm-enable (&optional undo)
-  "Obsolete function to enable/disable EXWM, use `exwm-wm-mode' instead.
-Optional argument UNDO may be either of the following symbols:
-- `undo' prevents reinitialization.
-- `undo-all' attempts to revert all hooks and advice."
-  (declare (obsolete exwm-wm-mode "0.33"))
-  (message "EXWM: Use `exwm-wm-mode' instead of the obsolete `exwm-enable'.")
-  (pcase undo
-    (`undo (remove-hook 'window-setup-hook #'exwm--init)
-           (remove-hook 'after-make-frame-functions #'exwm--init))
-    (`undo-all (exwm-wm-mode -1))
-    (_ (exwm-wm-mode 1))))
-
 (defun exwm--server-stop ()
   "Stop the subordinate Emacs server."
   (exwm--log)
@@ -1295,9 +1249,6 @@ If FORCE is any other non-nil value, force killing of Emacs."
     (exwm-wm-mode -1)
     ;; Set the return value.
     t))
-
-(define-obsolete-function-alias 'exwm-init #'exwm--init "0.33")
-(define-obsolete-function-alias 'exwm-exit #'exwm--exit "0.33")
 
 (provide 'exwm)
 ;;; exwm.el ends here
